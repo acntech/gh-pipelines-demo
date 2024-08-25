@@ -1,0 +1,14 @@
+{
+  "cd": {
+    "promotions": [
+      {
+        "source_env": "DEV",
+        "target_env": "QA",
+        "status": "success",
+        "started_at": "2024-08-25T17:25:21Z",
+        "finished_at": "2024-08-25T17:26:25Z",
+        "duration": "PT1M4S"
+      }
+    ]
+  }
+}
