@@ -16,6 +16,14 @@
         "started_at": "2024-08-26T18:48:45Z",
         "finished_at": "2024-08-26T18:49:53Z",
         "duration": "PT1M8S"
+      },
+      {
+        "source_env": "DEV",
+        "target_env": "QA",
+        "status": "success",
+        "started_at": "2024-08-26T18:51:39Z",
+        "finished_at": "2024-08-26T18:52:28Z",
+        "duration": "PT49S"
       }
     ]
   }
