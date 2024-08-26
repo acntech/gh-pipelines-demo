@@ -7,5 +7,16 @@
     "version": "0.2.1",
     "duration": "PT43S"
   },
-  "cd": {}
+  "cd": {
+    "promotions": [
+      {
+        "source_env": "LOCAL",
+        "target_env": "DEV",
+        "status": "success",
+        "started_at": "2024-08-26T08:33:25Z",
+        "finished_at": "2024-08-26T08:34:22Z",
+        "duration": "PT57S"
+      }
+    ]
+  }
 }
