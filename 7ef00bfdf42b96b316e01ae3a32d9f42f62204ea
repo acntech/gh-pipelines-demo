@@ -1,0 +1,11 @@
+{
+  "ci": {
+    "started_at": "2024-08-26T08:32:44Z",
+    "finished_at": "2024-08-26T08:33:27Z",
+    "status": "success",
+    "commit_hash": "7ef00bfdf42b96b316e01ae3a32d9f42f62204ea",
+    "version": "0.2.1",
+    "duration": "PT43S"
+  },
+  "cd": {}
+}
