@@ -1,0 +1,504 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'QA'
+      version:
+        description: 'Version to deploy'
+        required: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.event.inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+
+  init:
+    runs-on: ubuntu-latest
+    outputs:
+      CD_STARTED_AT: ${{ steps.record_cd_start_time.outputs.CD_STARTED_AT }}
+    steps:
+
+      - name: Record CD start time
+        id: record_cd_start_time
+        run: |
+          echo "CD_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT
+
+      - name: Echo messages
+        run: |
+          echo "Deploying version ${{ github.event.inputs.version }} to environment: ${{ github.event.inputs.environment }}"
+          echo "Deployment initiated by ${{ github.actor }}"  
+
+      - name: Debug - Print environment variables and context
+        run: |
+          echo "GITHUB_CONTEXT:"
+          echo "${{ toJson(github) }}" >> github_context.json
+          cat github_context.json
+          echo "ENVIRONMENT VARIABLES:"
+          env
+          echo "GH Actions Variables:"
+          echo "APP_NAME=${{ vars.APP_NAME }}"
+          echo "ENVIRONMENTS=${{ vars.ENVIRONMENTS }}"
+          echo "DEV_PORT=${{ vars.DEV_PORT }}"
+          echo "TEST_PORT=${{ vars.TEST_PORT }}"
+          echo "PROD_PORT=${{ vars.PROD_PORT }}"
+          echo "REGISTRY_URL=${{ vars.REGISTRY_URL }}"
+          echo "REMOTE_HOST=${{ vars.REMOTE_HOST }}"
+          echo "SSH_PORT=${{ vars.SSH_PORT }}"
+          echo "SSH_USER=${{ vars.SSH_USER }}"  
+
+  validate:
+    runs-on: ubuntu-latest
+    needs: init
+    outputs:
+     PREV_ENV: ${{ steps.validate_deployment.outputs.PREV_ENV }}
+    steps:
+
+      - name: Checkout project
+        uses: actions/checkout@v3
+        with:
+          ref: v${{ github.event.inputs.version }} # Checkout the specific tag
+          fetch-depth: 1
+
+      - name: Fetch all tags
+        run: git fetch --tags
+
+      - name: Validate Deployment
+        id: validate_deployment
+        run: |
+          # Access the ENVIRONMENTS variable from vars
+          ENVIRONMENTS="${{ vars.ENVIRONMENTS }}"
+
+          # Convert the comma-separated list to an array
+          IFS=',' read -r -a ENV_ARRAY <<< "$ENVIRONMENTS"
+
+          # Find the current environment and the previous one
+          for i in "${!ENV_ARRAY[@]}"; do
+            if [[ "${ENV_ARRAY[$i]}" == "${{ github.event.inputs.environment }}" ]]; then
+              if [[ $i -eq 0 ]]; then
+                echo "This is the first environment (${ENV_ARRAY[$i]}), setting PREV_ENV to LOCAL."
+                PREV_ENV="LOCAL"
+              else
+                PREV_ENV="${ENV_ARRAY[$((i-1))]}"
+              fi
+              break
+            fi
+          done
+
+          echo "PREV_ENV=$PREV_ENV" >> $GITHUB_OUTPUT
+
+          # Check if moving from LOCAL to the first environment
+          if [[ "$PREV_ENV" == "LOCAL" && "${{ github.event.inputs.environment }}" != "${ENV_ARRAY[0]}" ]]; then
+            echo "Invalid promotion: Cannot move from LOCAL to ${{ github.event.inputs.environment }}. The only allowed promotion from LOCAL is to ${ENV_ARRAY[0]}."
+            exit 1
+          fi
+
+          # If PREV_ENV is not "LOCAL", validate the previous deployment
+          if [[ "$PREV_ENV" != "LOCAL" ]]; then
+            PREV_TAG="${{ github.event.inputs.version }}/CD/${PREV_ENV}/PASS"
+
+            echo "Looking for tag: $PREV_TAG"
+            if git rev-parse "$PREV_TAG" >/dev/null 2>&1; then
+              echo "Validation passed: The artifact has been deployed to $PREV_ENV."
+            else
+              echo "Validation failed: The artifact has NOT been deployed to $PREV_ENV."
+              exit 1
+            fi
+          else
+            echo "Skipping validation as this is the first environment (LOCAL)."
+          fi 
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: validate
+    if: success()
+    outputs:
+      EXTERNAL_PORT: ${{ steps.determine_port.outputs.EXTERNAL_PORT }}
+
+    steps:
+
+      - name: Determine external port
+        id: determine_port
+        run: |
+          case "${{ github.event.inputs.environment }}" in
+            "DEV") 
+              EXTERNAL_PORT="${{ vars.DEV_PORT }}" 
+              echo "EXTERNAL_PORT=${{ vars.DEV_PORT }}" >> $GITHUB_OUTPUT
+              ;;
+            "QA") 
+              EXTERNAL_PORT="${{ vars.QA_PORT }}" 
+              echo "EXTERNAL_PORT=${{ vars.QA_PORT }}" >> $GITHUB_OUTPUT
+              ;;
+            "PROD") 
+              EXTERNAL_PORT="${{ vars.PROD_PORT }}" 
+              echo "EXTERNAL_PORT=${{ vars.PROD_PORT }}" >> $GITHUB_OUTPUT
+              ;;
+            *) 
+              echo "Unknown environment: ${{ github.event.inputs.environment }}"
+              exit 1
+              ;;
+          esac
+          echo "EXTERNAL_PORT=$EXTERNAL_PORT" >> $GITHUB_OUTPUT
+
+      - name: Deploy to remote host via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ vars.REMOTE_HOST }}
+          username: ${{ vars.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ vars.SSH_PORT }}
+          script: |
+            set -e
+            exec > >(tee -i /dev/stderr)
+            exec 2>&1
+            
+            IMAGE_NAME="${{ vars.APP_NAME }}:${{ github.event.inputs.version }}"
+            CONTAINER_NAME="${{ vars.APP_NAME }}-${{ github.event.inputs.environment }}"
+            
+            docker pull ${{ vars.REGISTRY_URL }}/$IMAGE_NAME
+            
+            CONTAINER_ID=$(docker ps -q --filter "name=$CONTAINER_NAME")
+            
+            if [ -n "$CONTAINER_ID" ]; then
+              docker stop $CONTAINER_ID
+              docker rm $CONTAINER_ID
+            fi
+            
+            docker run -d \
+             --name $CONTAINER_NAME \
+             --label environment=${{ github.event.inputs.environment }} \
+             --label version=${{ github.event.inputs.version }} \
+             -e ENV=${{ github.event.inputs.environment }} \
+             -e VERSION=${{ github.event.inputs.version }} \
+             -p ${{ steps.determine_port.outputs.EXTERNAL_PORT }}:80 \
+             ${{ vars.REGISTRY_URL }}/$IMAGE_NAME
+
+  test:
+    runs-on: ubuntu-latest
+    needs: [ init, deploy ]
+    if: success()
+    outputs:
+      TEST_RESULTS_ENCODED: ${{ steps.run_tests.outputs.TEST_RESULTS_ENCODED }}
+
+    steps:
+      - name: Set up environment tests
+        id: setup_tests
+        run: |
+          ENVIRONMENT=${{ github.event.inputs.environment }}
+
+          # Parse ENV_TESTS variable into an array of tests for the current environment
+          TESTS=$(echo "${{ vars.ENV_TESTS }}" | grep "^$ENVIRONMENT:" | cut -d ':' -f2 | tr -d ' ' | tr ',' '\n')
+
+          # Export the tests to run, removing leading/trailing spaces and newlines
+          echo "TESTS_TO_RUN=$(echo $TESTS | tr -d '\r' | xargs)" >> $GITHUB_ENV
+
+      # Need to checkout the project to access the tests
+      - name: Checkout project
+        uses: actions/checkout@v3
+        with:
+          ref: v${{ github.event.inputs.version }} # Checkout the specific tag
+          fetch-depth: 1
+
+      - name: Set up Git user
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "GitHub Actions Bot"        
+
+      - name: Run all tests
+        id: run_tests
+        run: |
+          # Initialize a JSON string to store all test results
+          TEST_RESULTS="{}"
+          OVERALL_EXIT_CODE=0  # Initialize overall status variable
+
+          # Disable exit on error within the loop
+          set +e
+
+          # Iterate over the tests listed in the tests_to_run variable
+          for test in ${{ env.TESTS_TO_RUN }}; do
+            TEST_NAME=$test          
+            STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+            # Ensure the test script is executable and has the correct Unix line endings
+            if [ "$test" = "smoke-tests" ]; then
+              chmod +x ./tests/smoke-tests.sh
+              ./tests/smoke-tests.sh ${{ vars.REMOTE_HOST }} ${{ needs.deploy.outputs.EXTERNAL_PORT }} ${{ github.event.inputs.version }} ${{ github.event.inputs.environment }}
+            else
+              TEST_SCRIPT="./tests/$test.sh"
+              # Remove any carriage return characters from the script path
+              TEST_SCRIPT=$(echo "$TEST_SCRIPT" | tr -d '\r')
+              chmod +x "$TEST_SCRIPT"
+              "$TEST_SCRIPT"
+            fi
+
+            EXIT_CODE=$?
+            
+            echo "Test $TEST_NAME exited with code: $EXIT_CODE"  
+          
+            FINISHED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+            # Calculate duration in seconds
+            DURATION_SECONDS=$(($(date -d "$FINISHED_AT" +%s) - $(date -d "$STARTED_AT" +%s)))
+
+            # Convert duration to ISO 8601 format (PTnHnMnS)
+            DURATION="PT"
+            HOURS=$(($DURATION_SECONDS / 3600))
+            MINUTES=$((($DURATION_SECONDS % 3600) / 60))
+            SECONDS=$(($DURATION_SECONDS % 60))
+
+            if [ $HOURS -gt 0 ]; then
+              DURATION="${DURATION}${HOURS}H"
+            fi
+            if [ $MINUTES -gt 0 ]; then
+              DURATION="${DURATION}${MINUTES}M"
+            fi
+            DURATION="${DURATION}${SECONDS}S"
+
+            if [ $EXIT_CODE -eq 0 ]; then
+              STATUS="PASS"
+            else
+              STATUS="FAIL"
+              OVERALL_EXIT_CODE=1  # Mark overall status as failure
+            fi
+
+            # Update the TEST_RESULTS JSON with the current test's metadata
+            TEST_RESULTS=$(echo "$TEST_RESULTS" | jq -c \
+              --arg test_name "$TEST_NAME" \
+              --arg started_at "$STARTED_AT" \
+              --arg finished_at "$FINISHED_AT" \
+              --arg duration "$DURATION" \
+              --arg status "$STATUS" \
+              '. + {($test_name): {started_at: $started_at, finished_at: $finished_at, duration: $duration, status: $status}}')
+
+            # Tag the repo with the test status            
+            TAG_NAME="${{ github.event.inputs.version }}/CD/${{ github.event.inputs.environment }}/$TEST_NAME/$STATUS"
+            echo "-----> Tagging repo with status for test $TEST_NAME: $TAG_NAME"
+            git tag $TAG_NAME
+          done
+
+          # Re-enable exit on error
+          set -e
+
+          # Push all tags to the remote repository
+          git push origin --tags          
+
+          echo "TEST_RESULTS=$TEST_RESULTS"
+
+          # Encode the JSON string as base64 (without newlines) to safely pass it between steps
+          TEST_RESULTS_ENCODED=$(echo "$TEST_RESULTS" | base64 -w 0)
+
+          echo "TEST_RESULTS_ENCODED=$TEST_RESULTS_ENCODED"
+
+          # Output the final encoded JSON containing all test results
+          echo "TEST_RESULTS_ENCODED=$TEST_RESULTS_ENCODED" >> $GITHUB_OUTPUT
+
+          # Exit with a non-zero status if any test failed
+          exit $OVERALL_EXIT_CODE  
+
+  success:
+    runs-on: ubuntu-latest
+    needs: [ init, validate, test ]
+    if: success()
+    steps:
+
+      - name: Checkout project
+        uses: actions/checkout@v3
+        with:
+          ref: v${{ github.event.inputs.version }} # Checkout the specific version
+          fetch-depth: 1 # Shallow clone to avoid fetching unnecessary history
+
+      - name: Set up Git user
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "GitHub Actions Bot"    
+
+      - name: Create (success) Git tag
+        run: |
+          TAG_NAME="${{ github.event.inputs.version }}/CD/${{ github.event.inputs.environment }}/PASS"
+          echo "-----> Tagging repo indicating successful deployment to ${{ github.event.inputs.environment }}: $TAG_NAME"
+          git tag $TAG_NAME
+          git push origin $TAG_NAME          
+
+      - name: Fetch Git notes and update with CD info
+        run: |
+          # Set CD status and timestamps
+          CD_FINISHED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          CD_STATUS="PASS"
+          CD_STARTED_AT="${{ needs.init.outputs.CD_STARTED_AT }}"
+
+          # Calculate the duration in seconds
+          DURATION_SECONDS=$(($(date -d "$CD_FINISHED_AT" +%s) - $(date -d "$CD_STARTED_AT" +%s)))
+
+          # Convert duration to ISO 8601 format (PTnHnMnS)
+          DURATION="PT"
+          HOURS=$(($DURATION_SECONDS / 3600))
+          MINUTES=$((($DURATION_SECONDS % 3600) / 60))
+          SECONDS=$(($DURATION_SECONDS % 60))
+
+          if [ $HOURS -gt 0 ]; then
+            DURATION="${DURATION}${HOURS}H"
+          fi
+          if [ $MINUTES -gt 0 ]; then
+            DURATION="${DURATION}${MINUTES}M"
+          fi
+          DURATION="${DURATION}${SECONDS}S"
+
+          # Fetch existing git notes to ensure they are up-to-date
+          git fetch origin "refs/notes/*:refs/notes/*"
+
+          # Retrieve the existing devops note associated with the version tag
+          EXISTING_NOTE=$(git notes --ref=devops show v${{ github.event.inputs.version }} 2>/dev/null || echo "{}")
+          echo -e "Existing JSON devops data for git notes:\n$EXISTING_NOTE"
+
+          # Extract and decode the test results JSON from the test job
+          TEST_RESULTS_ENCODED=${{ needs.test.outputs.TEST_RESULTS_ENCODED }}
+          TEST_RESULTS=$(echo "$TEST_RESULTS_ENCODED" | base64 --decode)
+
+          echo "TEST_RESULTS after decoding: $TEST_RESULTS"
+
+          # Construct the new promotion entry with dynamic test results
+          PROMOTION_ENTRY=$(jq -n --argjson tests "$TEST_RESULTS" \
+            --arg source_env "${{ needs.validate.outputs.PREV_ENV }}" \
+            --arg target_env "${{ github.event.inputs.environment }}" \
+            --arg status "$CD_STATUS" \
+            --arg started_at "$CD_STARTED_AT" \
+            --arg finished_at "$CD_FINISHED_AT" \
+            --arg duration "$DURATION" \
+            '{
+              source_env: $source_env,
+              target_env: $target_env,
+              status: $status,
+              started_at: $started_at,
+              finished_at: $finished_at,
+              duration: $duration,
+              tests: $tests
+            }')
+
+          # Update the existing note with the new promotion entry
+          UPDATED_NOTE=$(echo "$EXISTING_NOTE" | jq --argjson promotion "$PROMOTION_ENTRY" '.cd.promotions += [$promotion]')
+
+          # Print the updated note for verification
+          echo -e "Updated JSON devops data for git notes:\n$UPDATED_NOTE"
+
+          # Save the updated JSON data to a file
+          echo "$UPDATED_NOTE" > cicd.json
+
+          # Force-add the updated note to the specific version tag
+          git notes --ref=devops add -f -m "$(cat cicd.json)" v${{ github.event.inputs.version }}
+
+          # Push the updated notes back to the remote repository
+          git push origin "refs/notes/*"  
+
+  failure:
+    runs-on: ubuntu-latest
+    needs: [ init, validate, deploy, test ]
+    if: failure() && needs.validate.result == 'success'
+    steps:
+
+      - name: Checkout project
+        uses: actions/checkout@v3
+        with:
+          ref: v${{ github.event.inputs.version }} # Checkout the specific version
+          fetch-depth: 1 # Shallow clone to avoid fetching unnecessary history
+
+      - name: Set up Git user
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "GitHub Actions Bot"
+
+      - name: Identify Failed Job
+        id: identify_failure
+        run: |
+          if [ "${{ needs.init.result }}" == "failure" ]; then
+          echo "FAILED_JOB=init" >> $GITHUB_ENV
+          elif [ "${{ needs.deploy.result }}" == "failure" ]; then
+          echo "FAILED_JOB=deploy" >> $GITHUB_ENV
+          elif [ "${{ needs.test.result }}" == "failure" ]; then
+          echo "FAILED_JOB=test" >> $GITHUB_ENV
+          else
+          echo "FAILED_JOB=unknown" >> $GITHUB_ENV
+          fi
+          echo "The job that failed is: $FAILED_JOB"    
+
+      - name: Create (failure) Git tag
+        run: |
+          TAG_NAME="${{ github.event.inputs.version }}/CD/${{ github.event.inputs.environment }}/FAIL"
+          echo "-----> Tagging repo indicating unsuccessful deployment to ${{ github.event.inputs.environment }}: $TAG_NAME"
+          git tag -a $TAG_NAME -m "CD (promotion) failed in job: ${{ env.FAILED_JOB }}"
+          git push origin $TAG_NAME
+
+      - name: Fetch Git notes devops object and update with CD info
+        run: |
+          # Set CD status and timestamps
+          CD_FINISHED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          CD_STARTED_AT="${{ needs.init.outputs.CD_STARTED_AT }}"
+          CD_STATUS="FAIL"
+
+          # Calculate the duration in seconds
+          DURATION_SECONDS=$(($(date -d "$CD_FINISHED_AT" +%s) - $(date -d "$CD_STARTED_AT" +%s)))
+
+          # Convert duration to ISO 8601 format (PTnHnMnS)
+          DURATION="PT"
+          HOURS=$(($DURATION_SECONDS / 3600))
+          MINUTES=$((($DURATION_SECONDS % 3600) / 60))
+          SECONDS=$(($DURATION_SECONDS % 60))
+
+          if [ $HOURS -gt 0 ]; then
+            DURATION="${DURATION}${HOURS}H"
+          fi
+          if [ $MINUTES -gt 0 ]; then
+            DURATION="${DURATION}${MINUTES}M"
+          fi
+          DURATION="${DURATION}${SECONDS}S"
+
+          # Fetch existing git notes to ensure they are up-to-date
+          git fetch origin "refs/notes/*:refs/notes/*"
+
+          # Retrieve the existing devops note associated with the version tag
+          EXISTING_NOTE=$(git notes --ref=devops show v${{ github.event.inputs.version }} 2>/dev/null || echo "{}")
+          echo -e "Existing JSON devops data for git notes:\n$EXISTING_NOTE"
+
+          # Extract and decode the test results JSON from the test job
+          TEST_RESULTS_ENCODED=${{ needs.test.outputs.TEST_RESULTS_ENCODED }}
+          TEST_RESULTS=$(echo "$TEST_RESULTS_ENCODED" | base64 --decode)
+
+          echo "TEST_RESULTS after decoding: $TEST_RESULTS"
+
+          # Construct the new promotion entry with dynamic test results and failure message
+          PROMOTION_ENTRY=$(jq -n --argjson tests "$TEST_RESULTS" \
+            --arg source_env "${{ needs.validate.outputs.PREV_ENV }}" \
+            --arg target_env "${{ github.event.inputs.environment }}" \
+            --arg status "$CD_STATUS" \
+            --arg message "CD (promotion) failed in job: ${{ env.FAILED_JOB }}" \
+            --arg started_at "$CD_STARTED_AT" \
+            --arg finished_at "$CD_FINISHED_AT" \
+            --arg duration "$DURATION" \
+            '{
+              source_env: $source_env,
+              target_env: $target_env,
+              status: $status,
+              message: $message,
+              started_at: $started_at,
+              finished_at: $finished_at,
+              duration: $duration,
+              tests: $tests
+            }')
+
+          # Update the existing note with the new promotion entry
+          UPDATED_NOTE=$(echo "$EXISTING_NOTE" | jq --argjson promotion "$PROMOTION_ENTRY" '.cd.promotions += [$promotion]')
+
+          # Print the updated note for verification
+          echo -e "Updated JSON devops data for git notes:\n$UPDATED_NOTE"
+
+          # Save the updated JSON data to a file (optional)
+          echo "$UPDATED_NOTE" > cicd.json
+
+          # Force-add the updated note to the specific version tag
+          git notes --ref=devops add -f -m "$(cat cicd.json)" v${{ github.event.inputs.version }}
+
+          # Push the updated notes back to the remote repository
+          git push origin "refs/notes/*"

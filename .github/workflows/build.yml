@@ -1,0 +1,336 @@
+name: Build, Tag, and Push Docker Image
+
+on:
+  push:
+    branches:
+      - main
+      - test
+      - simple
+
+permissions: # Explicitly grant write permissions
+  contents: write
+  actions: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+
+  build:
+    runs-on: ubuntu-latest
+    
+    outputs:
+      VERSION_TAG: ${{ steps.calculate_version.outputs.VERSION_TAG }}
+      PROJECT_VERSION: ${{ steps.calculate_version.outputs.PROJECT_VERSION }}
+      CI_STARTED_AT: ${{ steps.record_ci_start_time.outputs.CI_STARTED_AT }}
+      UNIT_TESTS_STARTED_AT: ${{ steps.unit_tests.outputs.UNIT_TESTS_STARTED_AT }}
+      UNIT_TESTS_FINISHED_AT: ${{ steps.unit_tests.outputs.UNIT_TESTS_FINISHED_AT }}
+      UNIT_TESTS_STATUS: ${{ steps.unit_tests.outputs.UNIT_TESTS_STATUS }}
+
+    steps:
+
+      - name: Record CI start time
+        id: record_ci_start_time
+        run: |
+          echo "CI_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT 
+
+      - name: Debug - Print environment variables and context
+        run: |
+          echo "${{ toJson(github) }}" >> github_context.json
+          echo "GITHUB_CONTEXT:"
+          cat github_context.json
+          echo "ENVIRONMENT VARIABLES:"
+          env
+          echo "GH Actions Variables:"
+          echo "APP_NAME=${{ vars.APP_NAME }}"
+          echo "ENVIRONMENTS=${{ vars.ENVIRONMENTS }}"
+          echo "DEV_PORT=${{ vars.DEV_PORT }}"
+          echo "TEST_PORT=${{ vars.TEST_PORT }}"
+          echo "PROD_PORT=${{ vars.PROD_PORT }}"
+          echo "REGISTRY_URL=${{ vars.REGISTRY_URL }}"
+          echo "REGISTRY_USER=${{ vars.REGISTRY_USER }}"
+          echo "REMOTE_HOST=${{ vars.REMOTE_HOST }}"
+          echo "SSH_PORT=${{ vars.SSH_PORT }}"
+          echo "SSH_USER=${{ vars.SSH_USER }}"
+
+      - name: Set up xmllint
+        run: sudo apt-get update && sudo apt-get install -y libxml2-utils
+
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 1 # Shallow clone to avoid fetching unnecessary history
+
+      - name: Set up Git user
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "GitHub Actions Bot"
+
+      - name: Fetch all tags
+        run: git fetch --tags
+
+      - name: Calculate PATCH version and tag Git
+        id: calculate_version
+        run: |
+          # Extract MAJOR and MINOR from the pom.xml file
+          MAJOR=$(xmllint --xpath "string(//*[local-name()='properties']/*[local-name()='semver.major'])" pom.xml)
+          MINOR=$(xmllint --xpath "string(//*[local-name()='properties']/*[local-name()='semver.minor'])" pom.xml)
+    
+          MAJOR_MINOR="${MAJOR}.${MINOR}"          
+          echo "Current project MAJOR.MINOR version: $MAJOR_MINOR"
+          
+          LATEST_TAG=$(git tag -l "v*" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -rV | head -n 1)
+          echo "Latest version tag: $LATEST_TAG"
+          
+          if [ -z "$LATEST_TAG" ]; then
+              PATCH=0
+          else
+              TAG_MAJOR_MINOR=$(echo $LATEST_TAG | sed -E 's/v([0-9]+\.[0-9]+)\.[0-9]+/\1/')
+              TAG_PATCH=$(echo $LATEST_TAG | sed -E 's/v[0-9]+\.[0-9]+\.([0-9]+)/\1/')
+              if [ "$(printf '%s\n' "$TAG_MAJOR_MINOR" "$MAJOR_MINOR" | sort -rV | head -n 1)" != "$MAJOR_MINOR" ]; then
+                  echo "Current version is less than the last tag. Aborting."
+                  exit 1
+              elif [ "$MAJOR_MINOR" = "$TAG_MAJOR_MINOR" ]; then
+                  PATCH=$(($TAG_PATCH + 1))
+                  echo "Incremented patch version: $PATCH"
+              else
+                  PATCH=0
+                  echo "Patch version reset to 0"
+              fi
+          fi
+          
+          PROJECT_VERSION="${MAJOR_MINOR}.${PATCH}"
+          VERSION_TAG="v$PROJECT_VERSION"
+          echo "New project version: $PROJECT_VERSION"
+          
+          # Tag the new version in Git
+          echo "-----> Tagging repository: $VERSION_TAG"         
+          git tag "$VERSION_TAG"
+          git push origin "$VERSION_TAG"
+          
+          # Output the version and tag information
+          echo "VERSION_TAG=$VERSION_TAG" >> $GITHUB_OUTPUT
+          echo "PROJECT_VERSION=$PROJECT_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Run unit tests
+        id: unit_tests
+        run: |
+          echo "UNIT_TESTS_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT
+
+          # Temporarily disable exit on error
+          set +e
+
+          chmod +x ./tests/unit-tests.sh
+          ./tests/unit-tests.sh
+          EXIT_CODE=$?
+
+          # Re-enable exit on error
+          set -e
+
+          echo "UNIT_TESTS_FINISHED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT
+
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "UNIT_TESTS_STATUS=PASS" >> $GITHUB_OUTPUT
+            TAG_NAME="${{ steps.calculate_version.outputs.PROJECT_VERSION }}/CI/unit-tests/PASS"
+          else
+            echo "UNIT_TESTS_STATUS=FAIL" >> $GITHUB_OUTPUT
+            TAG_NAME="${{ steps.calculate_version.outputs.PROJECT_VERSION }}/CI/unit-tests/FAIL"
+          fi
+
+          echo "-----> Tagging repo with unit tests status: $TAG_NAME"
+          git tag $TAG_NAME
+          git push origin $TAG_NAME
+
+          exit $EXIT_CODE
+      
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+        with:
+          driver: docker  # Use the "docker" driver instead of "docker-container"
+          buildkitd-flags: --debug  # Optional: enable debug mode for more detailed logs
+
+      - name: Configure Docker daemon for insecure registry
+        run: |
+          echo '{
+            "insecure-registries" : ["${{ vars.REGISTRY_URL }}"]
+          }' | sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker
+
+      - name: Wait for Docker to restart and be available
+        run: |
+          for i in {1..30}; do
+            if sudo docker info > /dev/null 2>&1; then
+              echo "Docker is up and running"
+              break
+            fi
+            echo "Waiting for Docker to be available..."
+            sleep 1
+          done
+
+          if ! sudo docker info > /dev/null 2>&1; then
+            echo "Docker did not start successfully within the expected time" >&2
+            exit 1
+          fi    
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ vars.REGISTRY_URL }}/${{ vars.APP_NAME }}:${{ steps.calculate_version.outputs.PROJECT_VERSION }}
+            ${{ vars.REGISTRY_URL }}/${{ vars.APP_NAME }}:latest
+
+      - name: Trigger deploy workflow
+        if: success()
+        run: |
+          curl --fail -X POST \
+            -H "Accept: application/vnd.github.everest-preview+json" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/deploy.yml/dispatches \
+            -d '{"ref":"${{ github.ref_name }}", "inputs": {"environment": "DEV", "version": "${{ steps.calculate_version.outputs.PROJECT_VERSION }}"}}'
+
+  success:
+    runs-on: ubuntu-latest
+    needs: build
+    if: success()
+    steps:
+
+      - name: Checkout project
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ needs.build.outputs.VERSION_TAG }} # Checkout the specific version
+          fetch-depth: 1 # Shallow clone to avoid fetching unnecessary history
+
+      - name: Set up Git user
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "GitHub Actions Bot"
+
+      - name: Tag repo
+        run: |
+          TAG_NAME="${{ needs.build.outputs.PROJECT_VERSION }}/CI/PASS"
+          echo "Tagging repo with successful CI: $TAG_NAME"
+          git tag $TAG_NAME
+          git push origin $TAG_NAME
+
+      - name: Create a git notes (devops) JSON object
+        run: |
+          CI_STARTED_AT="${{ needs.build.outputs.CI_STARTED_AT }}"
+          CI_FINISHED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          CI_STATUS="PASS"
+          CI_HASH=$(git rev-parse HEAD)
+          
+          DURATION_SECONDS=$(($(date -d "$CI_FINISHED_AT" +%s) - $(date -d "$CI_STARTED_AT" +%s)))
+
+          # Convert duration to ISO 8601 format (PTnHnMnS)
+          DURATION="PT"
+          HOURS=$(($DURATION_SECONDS / 3600))
+          MINUTES=$((($DURATION_SECONDS % 3600) / 60))
+          SECONDS=$(($DURATION_SECONDS % 60))
+
+          if [ $HOURS -gt 0 ]; then
+            DURATION="${DURATION}${HOURS}H"
+          fi
+          if [ $MINUTES -gt 0 ]; then
+            DURATION="${DURATION}${MINUTES}M"
+          fi
+          DURATION="${DURATION}${SECONDS}S"
+          
+          JSON_DATA=$(jq -n \
+            '{
+              ci: {
+                started_at: "'$CI_STARTED_AT'",
+                finished_at: "'$CI_FINISHED_AT'",
+                status: "'$CI_STATUS'",
+                commit_hash: "'$CI_HASH'",
+                version: "'${{ needs.build.outputs.PROJECT_VERSION }}'",
+                duration: "'$DURATION'",
+                unit_tests: {
+                  started_at: "'${{ needs.build.outputs.UNIT_TESTS_STARTED_AT }}'",
+                  finished_at: "'${{ needs.build.outputs.UNIT_TESTS_FINISHED_AT }}'",
+                  status: "'${{ needs.build.outputs.UNIT_TESTS_STATUS }}'"
+                },
+                message: "CI passed successfully"
+              },
+              cd: {}
+            }')          
+          
+          echo -e "JSON data for git notes:\n$JSON_DATA"
+          echo "$JSON_DATA" > cicd.json
+          
+          # Fetch existing notes to avoid conflicts
+          git fetch origin "refs/notes/*:refs/notes/*"
+          
+          # Force-add the updated note
+          git notes --ref=devops add -f -m "$(cat cicd.json)" ${{ needs.build.outputs.VERSION_TAG }}
+          
+          # Push the notes back to the remote
+          git push origin "refs/notes/*"
+
+  failure:
+    runs-on: ubuntu-latest
+    needs: build
+    if: failure()
+    steps:
+
+      - name: Checkout project
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ needs.build.outputs.VERSION_TAG }} # Checkout the specific version
+          fetch-depth: 1 # Shallow clone to avoid fetching unnecessary history
+
+      - name: Set up Git user
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "GitHub Actions Bot"
+
+      - name: Tag repo
+        run: |
+          TAG_NAME="${{ needs.build.outputs.PROJECT_VERSION }}/CI/FAIL"
+          echo "Tagging repo with unsuccessful CI: $TAG_NAME"
+          git tag -a $TAG_NAME -m "CI FAIL: ${{ job.status }}"
+          git push origin $TAG_NAME
+
+      - name: Create a git notes (devops) JSON object
+        run: |
+          CI_FINISHED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          CI_STATUS="FAIL"
+          CI_HASH=$(git rev-parse HEAD)
+          
+          JSON_DATA=$(jq -n \
+            '{
+              ci: {
+                started_at: "'${{ needs.build.outputs.CI_STARTED_AT }}'",
+                finished_at: "'$CI_FINISHED_AT'",
+                status: "'$CI_STATUS'",
+                message: "CI FAIL: '${{ needs.build.result }}'",
+                commit_hash: "'$CI_HASH'",
+                version: "'${{ needs.build.outputs.PROJECT_VERSION }}'",
+                unit_tests: {
+                  started_at: "'${{ needs.build.outputs.UNIT_TESTS_STARTED_AT }}'",
+                  finished_at: "'${{ needs.build.outputs.UNIT_TESTS_FINISHED_AT }}'",
+                  status: "'${{ needs.build.outputs.UNIT_TESTS_STATUS }}'"
+                }
+              },
+              cd: {}
+            }')
+          
+          
+          # Print the updated note
+          echo -e "JSON data for git notes:\n$JSON_DATA"
+          
+          # Save the JSON data to a file
+          echo "$JSON_DATA" > cicd.json
+          
+          # Fetch existing notes to avoid conflicts
+          git fetch origin "refs/notes/*:refs/notes/*"
+          
+          # Force-add the updated note
+          git notes --ref=devops add -f -m "$(cat cicd.json)" ${{ needs.build.outputs.VERSION_TAG }}
+          
+          # Push the notes back to the remote
+          git push origin "refs/notes/*"

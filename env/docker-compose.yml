@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  registry:
+    image: registry:2
+    container_name: registry
+    ports:
+      - "55000:5000"
+    volumes:
+      - /srv/docker/registry:/var/lib/registry
+    environment:
+      - REGISTRY_STORAGE_DELETE_ENABLED=true
+      - REGISTRY_HTTP_HEADERS_Access-Control-Allow-Origin=*
+      - REGISTRY_HTTP_HEADERS_Access-Control-Allow-Methods=DELETE,GET,HEAD,OPTIONS,PUT
+      - REGISTRY_HTTP_HEADERS_Access-Control-Allow-Headers=Authorization,Accept,Content-Type, Cache-Control
+      - REGISTRY_HTTP_HEADERS_Access-Control-Expose-Headers=Docker-Content-Digest
+    restart: always
+    networks:
+      - registry-network
+
+  registry-ui:
+    image: joxit/docker-registry-ui
+    container_name: registry-ui
+    ports:
+      - "58080:80"
+    environment:
+      - SINGLE_REGISTRY=true
+      - REGISTRY_TITLE=Docker Registry UI
+      - DELETE_IMAGES=true
+      - SHOW_CONTENT_DIGEST=true
+      - NGINX_PROXY_PASS_URL=http://registry:5000
+      - SHOW_CATALOG_NB_TAGS=true
+      - CATALOG_MIN_BRANCHES=1
+      - CATALOG_MAX_BRANCHES=1
+      - TAGLIST_PAGE_SIZE=100
+      - REGISTRY_SECURED=false
+      - CATALOG_ELEMENTS_LIMIT=1000
+    restart: always
+    networks:
+      - registry-network
+    depends_on:
+      - registry
+
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    ports:
+      - "8000:8000"
+      - "59443:9443"
+    volumes:
+      - /srv/docker/portainer:/data
+    restart: always
+    networks:
+      - registry-network
+
+networks:
+  registry-network:
+    driver: bridge
