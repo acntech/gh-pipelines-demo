@@ -13,5 +13,31 @@
     },
     "message": "CI passed successfully"
   },
-  "cd": {}
+  "cd": {
+    "promotions": [
+      {
+        "source_env": "LOCAL",
+        "target_env": "DEV",
+        "status": "FAIL",
+        "message": "CD (promotion) failed in job: test",
+        "started_at": "2024-08-27T13:55:36Z",
+        "finished_at": "2024-08-27T13:56:43Z",
+        "duration": "PT1M7S",
+        "tests": {
+          "smoke-tests": {
+            "started_at": "2024-08-27T13:56:28Z",
+            "finished_at": "2024-08-27T13:56:29Z",
+            "duration": "PT1S",
+            "status": "PASS"
+          },
+          "regression-tests": {
+            "started_at": "2024-08-27T13:56:29Z",
+            "finished_at": "2024-08-27T13:56:32Z",
+            "duration": "PT3S",
+            "status": "FAIL"
+          }
+        }
+      }
+    ]
+  }
 }
