@@ -13,5 +13,30 @@
     },
     "message": "CI passed successfully"
   },
-  "cd": {}
+  "cd": {
+    "promotions": [
+      {
+        "source_env": "LOCAL",
+        "target_env": "DEV",
+        "status": "PASS",
+        "started_at": "2024-08-27T12:37:53Z",
+        "finished_at": "2024-08-27T12:38:57Z",
+        "duration": "PT1M4S",
+        "tests": {
+          "smoke_tests": {
+            "started_at": "2024-08-27T12:38:42Z",
+            "finished_at": "2024-08-27T12:38:42Z",
+            "duration": "PT0S",
+            "status": "PASS"
+          },
+          "regression_tests": {
+            "started_at": "2024-08-27T12:38:42Z",
+            "finished_at": "2024-08-27T12:38:43Z",
+            "duration": "PT1S",
+            "status": "PASS"
+          }
+        }
+      }
+    ]
+  }
 }
