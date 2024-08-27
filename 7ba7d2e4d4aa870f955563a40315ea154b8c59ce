@@ -70,6 +70,22 @@
             "status": "PASS"
           }
         }
+      },
+      {
+        "source_env": "QA",
+        "target_env": "PROD",
+        "status": "PASS",
+        "started_at": "2024-08-27T18:31:15Z",
+        "finished_at": "2024-08-27T18:32:24Z",
+        "duration": "PT1M9S",
+        "tests": {
+          "smoke-tests": {
+            "started_at": "2024-08-27T18:32:08Z",
+            "finished_at": "2024-08-27T18:32:09Z",
+            "duration": "PT1S",
+            "status": "PASS"
+          }
+        }
       }
     ]
   }
