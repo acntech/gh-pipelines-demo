@@ -1,0 +1,16 @@
+{
+  "ci": {
+    "started_at": "2024-08-27T13:59:15Z",
+    "finished_at": "2024-08-27T13:59:43Z",
+    "status": "FAIL",
+    "message": "CI FAIL: failure",
+    "commit_hash": "8a4ac40a0b0af21b2276ce85503e41f2175c9e6b",
+    "version": "1.0.5",
+    "unit_tests": {
+      "started_at": "2024-08-27T13:59:30Z",
+      "finished_at": "2024-08-27T13:59:31Z",
+      "status": "FAIL"
+    }
+  },
+  "cd": {}
+}
