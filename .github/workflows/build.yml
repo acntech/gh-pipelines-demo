@@ -221,7 +221,7 @@ jobs:
         run: |
           CI_STARTED_AT="${{ needs.build.outputs.CI_STARTED_AT }}"
           CI_FINISHED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          CI_STATUS="PASS"
+          CI_STATUS="${{ vars.STATUS_PASS }}"
           CI_HASH=$(git rev-parse HEAD)
           
           DURATION_SECONDS=$(($(date -d "$CI_FINISHED_AT" +%s) - $(date -d "$CI_STARTED_AT" +%s)))
@@ -290,15 +290,15 @@ jobs:
 
       - name: Tag repo
         run: |
-          TAG_NAME="${{ needs.build.outputs.PROJECT_VERSION }}/CI/FAIL"
-          echo "Tagging repo with unsuccessful CI: $TAG_NAME"
+          TAG_NAME="${{ needs.build.outputs.PROJECT_VERSION }}/CI/${{ vars.STATUS_FAIL }}"
+          echo "Tagging repo with failed CI: $TAG_NAME"
           git tag -a $TAG_NAME -m "CI FAIL: ${{ job.status }}"
           git push origin $TAG_NAME
 
       - name: Create a git notes (devops) JSON object
         run: |
           CI_FINISHED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          CI_STATUS="FAIL"
+          CI_STATUS="${{ vars.STATUS_FAIL }}"
           CI_HASH=$(git rev-parse HEAD)
           
           JSON_DATA=$(jq -n \

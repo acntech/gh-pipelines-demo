@@ -99,7 +99,7 @@ jobs:
 
           # If PREV_ENV is not "LOCAL", validate the previous deployment
           if [[ "$PREV_ENV" != "LOCAL" ]]; then
-            PREV_TAG="${{ github.event.inputs.version }}/CD/${PREV_ENV}/PASS"
+            PREV_TAG="${{ github.event.inputs.version }}/CD/${PREV_ENV}/${{ vars.STATUS_PASS }}"
 
             echo "Looking for tag: $PREV_TAG"
             if git rev-parse "$PREV_TAG" >/dev/null 2>&1; then
@@ -259,9 +259,9 @@ jobs:
             DURATION="${DURATION}${SECONDS}S"
 
             if [ $EXIT_CODE -eq 0 ]; then
-              STATUS="PASS"
+              STATUS="${{ vars.STATUS_PASS }}"
             else
-              STATUS="FAIL"
+              STATUS="${{ vars.STATUS_FAIL }}"
               OVERALL_EXIT_CODE=1  # Mark overall status as failure
             fi
 
@@ -318,7 +318,7 @@ jobs:
 
       - name: Create (success) Git tag
         run: |
-          TAG_NAME="${{ github.event.inputs.version }}/CD/${{ github.event.inputs.environment }}/PASS"
+          TAG_NAME="${{ github.event.inputs.version }}/CD/${{ github.event.inputs.environment }}/${{ vars.STATUS_PASS }}"
           echo "-----> Tagging repo indicating successful deployment to ${{ github.event.inputs.environment }}: $TAG_NAME"
           git tag $TAG_NAME
           git push origin $TAG_NAME          
@@ -327,7 +327,7 @@ jobs:
         run: |
           # Set CD status and timestamps
           CD_FINISHED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          CD_STATUS="PASS"
+          CD_STATUS="${{ vars.STATUS_PASS }}"
           CD_STARTED_AT="${{ needs.init.outputs.CD_STARTED_AT }}"
 
           # Calculate the duration in seconds
@@ -426,7 +426,7 @@ jobs:
 
       - name: Create (failure) Git tag
         run: |
-          TAG_NAME="${{ github.event.inputs.version }}/CD/${{ github.event.inputs.environment }}/FAIL"
+          TAG_NAME="${{ github.event.inputs.version }}/CD/${{ github.event.inputs.environment }}/${{ vars.STATUS_FAIL }}"
           echo "-----> Tagging repo indicating unsuccessful deployment to ${{ github.event.inputs.environment }}: $TAG_NAME"
           git tag -a $TAG_NAME -m "CD (promotion) failed in job: ${{ env.FAILED_JOB }}"
           git push origin $TAG_NAME
@@ -436,7 +436,7 @@ jobs:
           # Set CD status and timestamps
           CD_FINISHED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           CD_STARTED_AT="${{ needs.init.outputs.CD_STARTED_AT }}"
-          CD_STATUS="FAIL"
+          CD_STATUS="${{ vars.STATUS_FAIL }}"
 
           # Calculate the duration in seconds
           DURATION_SECONDS=$(($(date -d "$CD_FINISHED_AT" +%s) - $(date -d "$CD_STARTED_AT" +%s)))
