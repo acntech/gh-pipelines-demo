@@ -11,6 +11,11 @@ on:
         description: 'Version to deploy'
         required: true
 
+# Explicitly grant write permissions
+permissions:
+  contents: write
+  actions: write
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.event.inputs.environment }}
   cancel-in-progress: false
@@ -191,24 +196,32 @@ jobs:
           ENVIRONMENT=${{ github.event.inputs.environment }}
 
           # Parse ENV_TESTS variable into an array of tests for the current environment
-          TESTS=$(echo "${{ vars.ENV_TESTS }}" | grep "^$ENVIRONMENT:" | cut -d ':' -f2 | tr -d ' ' | tr ',' '\n')
+          TESTS=$(echo "${{ vars.ENV_TESTS }}" | grep "^$ENVIRONMENT:" | cut -d ':' -f2 | tr ',' '\n')
+    
+          # Trim each test and remove leading/trailing whitespace
+          TESTS_TO_RUN=$(echo "$TESTS" | while read -r test; do
+            echo -n "$(echo "$test" | xargs) "
+          done | xargs)
+    
+          # Export the trimmed tests
+          echo "TESTS_TO_RUN=$TESTS_TO_RUN" >> $GITHUB_ENV
 
-          # Export the tests to run, removing leading/trailing spaces and newlines
-          echo "TESTS_TO_RUN=$(echo $TESTS | tr -d '\r' | xargs)" >> $GITHUB_ENV
-
-      # Need to checkout the project to access the tests
+      # Need to checkout the project to access the test-scripts and push tags
       - name: Checkout project
         uses: actions/checkout@v3
         with:
           ref: v${{ github.event.inputs.version }} # Checkout the specific tag
           fetch-depth: 1
+          token: ${{ secrets.UAT }}  # Use the UAT for checkout
 
-      - name: Set up Git user
+      - name: Configure Git to use UAT for pushing
         run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "GitHub Actions Bot"        
+          git config user.name "thomas-muller666"  # Set your GitHub username
+          git config user.email "me.thomas.muller@gmail.com"  # Set your email associated with GitHub
+          git remote set-url origin https://x-access-token:${{ secrets.UAT }}@github.com/${{ github.repository }}.git    
 
-      - name: Run all tests
+      # Run all tests possible, tag the repo with PENDING if a test-script is missing for defined test
+      - name: Run tests
         id: run_tests
         run: |
           # Initialize a JSON string to store all test results
@@ -220,19 +233,27 @@ jobs:
 
           # Iterate over the tests listed in the tests_to_run variable
           for test in ${{ env.TESTS_TO_RUN }}; do
-            TEST_NAME=$test          
+            TEST_NAME=$(echo "$test" | xargs | tr -d '\r\n')  # Trim and remove any carriage returns/newlines
+            echo "Attempting to run test: $TEST_NAME"
+          
             STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-            # Ensure the test script is executable and has the correct Unix line endings
             if [ "$test" = "smoke-tests" ]; then
               chmod +x ./tests/smoke-tests.sh
               ./tests/smoke-tests.sh ${{ vars.REMOTE_HOST }} ${{ needs.deploy.outputs.EXTERNAL_PORT }} ${{ github.event.inputs.version }} ${{ github.event.inputs.environment }}
             else
               TEST_SCRIPT="./tests/$test.sh"
-              # Remove any carriage return characters from the script path
-              TEST_SCRIPT=$(echo "$TEST_SCRIPT" | tr -d '\r')
-              chmod +x "$TEST_SCRIPT"
-              "$TEST_SCRIPT"
+              # Check if the test script exists
+              if [ ! -f "$TEST_SCRIPT" ]; then
+                  echo "Test script not found: $TEST_SCRIPT"
+                  TAG_NAME="${{ github.event.inputs.version }}/CD/${{ github.event.inputs.environment }}/$TEST_NAME/${{ vars.STATUS_PENDING }}"
+                  echo "-----> Tagging repo with status for test $TEST_NAME: $TAG_NAME"
+                  git tag $TAG_NAME
+                  continue
+              else
+                chmod +x "$TEST_SCRIPT"
+                "$TEST_SCRIPT"
+              fi  
             fi
 
             EXIT_CODE=$?
@@ -316,12 +337,12 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "GitHub Actions Bot"    
 
-      - name: Create (success) Git tag
-        run: |
-          TAG_NAME="${{ github.event.inputs.version }}/CD/${{ github.event.inputs.environment }}/${{ vars.STATUS_PASS }}"
-          echo "-----> Tagging repo indicating successful deployment to ${{ github.event.inputs.environment }}: $TAG_NAME"
-          git tag $TAG_NAME
-          git push origin $TAG_NAME          
+#      - name: Create (success) Git tag
+#        run: |
+#          TAG_NAME="${{ github.event.inputs.version }}/CD/${{ github.event.inputs.environment }}/${{ vars.STATUS_PASS }}"
+#          echo "-----> Tagging repo indicating successful deployment to ${{ github.event.inputs.environment }}: $TAG_NAME"
+#          git tag $TAG_NAME
+#          git push origin $TAG_NAME
 
       - name: Fetch Git notes and update with CD info
         run: |

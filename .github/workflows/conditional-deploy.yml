@@ -1,0 +1,102 @@
+# Triggering a deployment pipeline based on env/PASSED tag pushed to the repository
+# Format: [major].[minor].[patch]/CD/[env]/PASS
+
+name: Conditional Deployment on Tag
+
+on:
+  push:
+    tags:
+      - '*.*.*/CD/*/PASS'
+
+jobs:
+  trigger-deployment:
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Extract Tag Information
+        id: extract
+        run: |
+          echo "Checking if tag represents an environment all-tests ${{ vars.STATUS_PASS }}: $GITHUB_REF"
+          
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          
+          TAG_REGEX="^([0-9]+)\.([0-9]+)\.([0-9]+)/CD/([a-zA-Z0-9_-]+)/${{ vars.STATUS_PASS }}$"
+          
+          if [[ "$TAG_NAME" =~ $TAG_REGEX ]]; then
+            MAJOR="${BASH_REMATCH[1]}"
+            MINOR="${BASH_REMATCH[2]}"
+            PATCH="${BASH_REMATCH[3]}"
+            ENV="${BASH_REMATCH[4]}"
+            VERSION="${MAJOR}.${MINOR}.${PATCH}"
+            echo "CURRENT_ENV=$ENV" >> $GITHUB_ENV
+            echo "VERSION=$VERSION" >> $GITHUB_ENV
+            echo "MATCHED=true" >> $GITHUB_ENV
+          else
+            echo "Tag format does not match the required pattern. Exiting gracefully."
+            echo "MATCHED=false" >> $GITHUB_ENV
+          fi
+
+      - name: Determine Next Environment
+        id: next-env
+        if: env.MATCHED == 'true'
+        run: |
+          ENVIRONMENTS="${{ vars.ENVIRONMENTS }}"
+          CURRENT_ENV="${{ env.CURRENT_ENV }}"
+
+          # Convert environments string to an array and trim whitespace
+          IFS=',' read -r -a ENV_ARRAY <<< "$ENVIRONMENTS"
+          for i in "${!ENV_ARRAY[@]}"; do
+            ENV_ARRAY[$i]=$(echo "${ENV_ARRAY[$i]}" | xargs)
+          done
+
+          # Find the index of the current environment
+          for i in "${!ENV_ARRAY[@]}"; do
+            if [[ "${ENV_ARRAY[$i]}" == "$CURRENT_ENV" ]]; then
+              CURRENT_INDEX=$i
+              break
+            fi
+          done
+
+          # Determine the next environment in the chain
+          if [[ -z "$CURRENT_INDEX" || "$CURRENT_INDEX" -ge $((${#ENV_ARRAY[@]} - 1)) ]]; then
+            echo "No next environment found. Skipping deployment."
+            echo "NEXT_ENV=" >> $GITHUB_ENV
+          else
+            NEXT_ENV="${ENV_ARRAY[$(($CURRENT_INDEX + 1))]}"
+            echo "NEXT_ENV=$NEXT_ENV" >> $GITHUB_ENV
+          fi
+
+      - name: Checkout Code for Tag Checking
+        if: env.NEXT_ENV != ''
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 1 # Shallow clone to avoid fetching unnecessary history
+
+      - name: Check for Existing Tags in Next Environment
+        id: check-next-env-tags
+        if: env.NEXT_ENV != ''
+        run: |
+          echo "Checking for existing tags in the next environment: ${{ env.NEXT_ENV }}"
+          
+          # Fetch tags from the repository
+          git fetch --tags
+          
+          EXISTING_TAG=$(git tag -l "${{ env.VERSION }}/CD/${{ env.NEXT_ENV }}/*")
+          if [[ -n "$EXISTING_TAG" ]]; then
+            echo "Tag(s) found for ${{ env.NEXT_ENV }}, indicating that this environment has already been deployed. Skipping promotion."
+            echo "NEXT_ENV=" >> $GITHUB_ENV
+          else
+            echo "No tags found for ${{ env.NEXT_ENV }}. Proceeding with the promotion."
+          fi
+
+      # Promote the deployment to the next environment
+      - name: Trigger Deployment Pipeline
+        if: env.MATCHED == 'true' && env.NEXT_ENV != ''
+        run: |
+          echo "Triggering deployment pipeline for version ${{ env.VERSION }} in the ${{ env.NEXT_ENV }} environment."
+          
+          curl --fail -X POST \
+            -H "Accept: application/vnd.github.everest-preview+json" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/deploy.yml/dispatches \
+            -d '{"ref":"${{ github.ref_name }}", "inputs": {"environment": "${{ env.NEXT_ENV }}", "version": "${{ env.VERSION }}"}}'

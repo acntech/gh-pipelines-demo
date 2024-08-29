@@ -78,20 +78,25 @@ target server using Docker containers for the deployed application/web server - 
 
 5. **Set GitHub variables:**
 
-   | **Name**        | **Value**                |
-   |-----------------|--------------------------|
-   | `APP_NAME`      | `devops-test-app-1`      |
-   | `DEV_PORT`      | `40080`                  |
-   | `ENVIRONMENTS`  | `DEV, QA, PROD`          |
-   | `PROD_PORT`     | `40082`                  |
-   | `QA_PORT`       | `40081`                  |
-   | `REGISTRY_URL`  | `[remote-host-IP]:55000` |
-   | `REMOTE_HOST`   | `[remote-host-IP]`         |
-   | `SSH_PORT`      | `50022`                  |
-   | `SSH_USER`      | `ubuntu`                 |
+   | **Name**         | **Value**                |
+   |------------------|--------------------------|
+   | `APP_NAME`       | `devops-test-app-1`      |
+   | `DEV_PORT`       | `40080`                  |
+   | `ENVIRONMENTS`   | `DEV, QA, PROD`          |
+   | `ENV_TESTS`      | `[tests for each env]`   |
+   | `PROD_PORT`      | `40082`                  |
+   | `QA_PORT`        | `40081`                  |
+   | `REGISTRY_URL`   | `[remote-host-IP]:55000` |
+   | `REMOTE_HOST`    | `[remote-host-IP]`       |
+   | `SSH_PORT`       | `50022`                  |
+   | `SSH_USER`       | `ubuntu`                 |
+   | `STATUS_FAIL`    | `FAIL`                   |
+   | `STATUS_PASS`    | `PASS`                   |
+   | `STATUS_PENDING` | `PENDING`                |
 
 6. **Set GitHub secrets:** 
-    - `SSH_KEY`: Private SSH key for the `ubuntu` user (copy from the setup script output) 
+    - `SSH_KEY`: Private SSH key for the `ubuntu` user (copy from the setup script output)
+    - `UAT`: User Access Token for the GitHub repository (to trigger the workflows via tags)
 
 ## Usage
 
@@ -99,8 +104,8 @@ target server using Docker containers for the deployed application/web server - 
 
   - Push to `main` to trigger the build (CI) workflow
   - The deployment (CD) workflow is triggered automatically after a successful build - will deploy to the DEV environment
-  - To deploy to QA and PROD, use the `deploy` workflow manually from the GitHub Actions page
-  - Note that the deployment script will prevent a version from being promoted to a higher environment if it has not been deployed to a lower environment first
+  - If all tests succeed for the any environment (DEV/QA), a success tag will trigger a promotion to the next environment (DEV -> QA, QA -> PROD).
+  - Note that the deployment script will prevent a version from being promoted to a higher environment if it has not been deployed to a lower environment first and all tests have passed in that enviroment.
 
 ## GitHub Actions Workflows
 
@@ -120,7 +125,7 @@ The build workflow (`.github/workflows/build.yml`) automates the process of buil
 8. **Configure Docker daemon for insecure registry**
 9. **Wait for Docker to restart and be available**
 10. **Build and push Docker image**
-11. **Trigger deploy workflow**
+11. **Trigger deploy (to DEV) workflow**
 
 #### Success and Failure Jobs
 
@@ -145,18 +150,44 @@ The deploy workflow (`.github/workflows/deploy.yml`) automates the deployment pr
 5. **Validate Deployment**
 6. **Determine external port**
 7. **Deploy to remote host via SSH**
-8. **Smoke test to check if the port is open**
-9. **Curl and check version in HTML output**
+8. **Run all defined tests**
+9. **Tag the repo according to test results**
 
-#### Success and Failure Jobs
+	
+### Verify and Tag workflow**
 
-- **Success Job:**
-    - Tags the repository with a successful deploy tag
-    - Updates git notes with CD info
+#### Workflow Steps
 
-- **Failure Job:**
-    - Tags the repository with a failed deploy tag
-    - Updates git notes with CD failure info
+1. **Trigger on specific tags**
+2. **Extract and validate tag information**
+3. **Checkout project at specified (version) tag**
+4. **Configure Git for pushing changes**
+5. **Remove any corresponding PENDING for test tag**
+6. **Check if all required tests for the environment are satisfied**
+7. **Tag environment as passed**
+
+ 	
+### Conditional Deployment Workflow**
+
+#### Workflow Steps
+
+1. **Trigger on environment/test passed tags**
+2. **Extract and validate tag information**
+3. **Checkout the project code at the specific tag**
+4. **Configure Git for pushing changes and fetching tags**
+5. **Remove any pending tags associated with the environment and test**
+6. **Check if all required tests for the environment are satisfied**
+7. **Tag the environment as passed if all tests are satisfied**
+
+#### Workflow Logic
+
+- The workflow is triggered by a specific tag format that indicates that all tests have passed for an environment.
+- It extracts and validates tag information, ensuring it matches the required pattern.
+- If the tag is valid, the workflow proceeds to check out the code and configure Git.
+- It removes any existing PENDING tags for the specified environment and test.
+- The workflow then checks if all required tests for the environment have been satisfied.
+- If all tests are satisfied, the environment is tagged as passed, and the tag is pushed to the repository.
+- If the tag does not match the required pattern, or if not all tests are satisfied, the workflow exits gracefully without making any changes.
 
 ## Ports and Services
 

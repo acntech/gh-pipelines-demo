@@ -1,0 +1,119 @@
+name: Verify Tests and Tag Environment
+
+on:
+  push:
+    tags:
+      - '*.*.*/CD/*/*/PASS'
+
+jobs:
+  verify-and-tag:
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Extract Tag Information
+        id: extract
+        run: |
+          echo "Checking if tag represents an environment test ${{ vars.STATUS_PASS }}: $GITHUB_REF"
+          
+          # Strip the 'refs/tags/' prefix from GITHUB_REF to get the actual tag name
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          
+          TAG_REGEX="^([0-9]+)\.([0-9]+)\.([0-9]+)/CD/([a-zA-Z0-9_-]+)/([a-zA-Z0-9_-]+)/${{ vars.STATUS_PASS }}$"
+          
+          if [[ "$TAG_NAME" =~ $TAG_REGEX ]]; then
+            MAJOR="${BASH_REMATCH[1]}"
+            MINOR="${BASH_REMATCH[2]}"
+            PATCH="${BASH_REMATCH[3]}"
+            ENV="${BASH_REMATCH[4]}"
+            TEST_NAME="${BASH_REMATCH[5]}"
+            VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          
+            echo "TEST_NAME=$TEST_NAME"
+            echo "VERSION=$VERSION"
+          
+            echo "MAJOR=$MAJOR" >> $GITHUB_ENV
+            echo "MINOR=$MINOR" >> $GITHUB_ENV
+            echo "PATCH=$PATCH" >> $GITHUB_ENV
+            echo "ENV=$ENV" >> $GITHUB_ENV
+            echo "TEST_NAME=$TEST_NAME" >> $GITHUB_ENV
+            echo "VERSION=$VERSION" >> $GITHUB_ENV
+            echo "MATCHED=true" >> $GITHUB_ENV
+          else
+            echo "Tag format does not match the required pattern. Exiting gracefully."
+            echo "MATCHED=false" >> $GITHUB_ENV
+          fi
+
+      - name: Checkout project
+        if: env.MATCHED == 'true'
+        uses: actions/checkout@v3
+        with:
+          ref: v${{ env.VERSION }}  # Checkout the specific tag
+          fetch-depth: 1
+          token: ${{ secrets.UAT }}  # Use the UAT for checkout
+
+      - name: Configure Git to use UAT for pushing and fetch tags
+        if: env.MATCHED == 'true'
+        run: |
+          git config user.name "thomas-muller666"  # Set your GitHub username
+          git config user.email "me.thomas.muller@gmail.com"  # Set your email associated with GitHub
+          git remote remove origin
+          git remote add origin https://x-access-token:${{ secrets.UAT }}@github.com/${{ github.repository }}.git
+          git fetch --tags   
+
+      - name: Remove potential PENDING Tag
+        if: env.MATCHED == 'true'
+        run: |
+          # Construct the PENDING tag name
+          PENDING_TAG="${{ env.VERSION }}/CD/${{ env.ENV }}/${{ env.TEST_NAME }}/${{ vars.STATUS_PENDING }}"
+          
+          # Check if the PENDING tag exists
+          if git rev-parse "$PENDING_TAG" >/dev/null 2>&1; then
+            echo "Removing PENDING tag: $PENDING_TAG"
+            git tag -d "$PENDING_TAG"
+            git push origin ":refs/tags/$PENDING_TAG"
+          else
+            echo "PENDING tag does not exist: $PENDING_TAG"
+          fi
+
+      - name: Check All Tests for Environment
+        if: env.MATCHED == 'true'
+        id: check-tests
+        run: |
+          ENV_TESTS="${{ vars.ENV_TESTS }}"
+          ENV="${{ env.ENV }}"
+          VERSION="${{ env.VERSION }}"
+          
+          # Get the list of required tests for the environment and remove any trailing newlines or carriage returns
+          REQUIRED_TESTS=$(echo "$ENV_TESTS" | grep "^$ENV:" | cut -d ':' -f2 | tr ',' '\n' | tr -d '\r' | xargs)
+          echo "Required tests for $ENV: $REQUIRED_TESTS"
+          
+          # Check if all required tests have been passed for the current version
+          ALL_TESTS_SATISFIED=true
+          for test in $REQUIRED_TESTS; do
+            TESTS_PASSED_TAG="$VERSION/CD/$ENV/$test/${{ vars.STATUS_PASS }}"
+            echo "Checking if test $test has been satisfied with tag: $TESTS_PASSED_TAG"
+          
+            TAG_EXISTS=$(git tag -l "$TESTS_PASSED_TAG")
+            if [[ -z "$TAG_EXISTS" ]]; then
+              echo "Test $test has not been satisfied yet."
+              ALL_TESTS_SATISFIED=false
+              break
+            fi
+            echo "Test $test has been satisfied."
+          done
+          
+          if [ "$ALL_TESTS_SATISFIED" = true ]; then
+            echo "All tests satisfied for version $VERSION in $ENV."
+            echo "ALL_TESTS_SATISFIED=true" >> $GITHUB_ENV
+          else
+            echo "Not all tests are satisfied for version $VERSION in $ENV. Exiting."
+            echo "ALL_TESTS_SATISFIED=false" >> $GITHUB_ENV
+          fi
+
+      - name: Tag Environment as Passed
+        if: env.ALL_TESTS_SATISFIED == 'true'
+        run: |
+          TAG_NAME="${{ env.VERSION }}/CD/${{ env.ENV }}/${{ vars.STATUS_PASS }}"
+          echo "-----> Tagging repo with ${{ vars.STATUS_PASS }} for all-tests: $TAG_NAME"
+          git tag "$TAG_NAME"
+          git push origin "$TAG_NAME"

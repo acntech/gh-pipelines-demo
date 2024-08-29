@@ -1,13 +1,13 @@
-name: Build, Tag, and Push Docker Image
+name: Build
 
 on:
   push:
     branches:
       - main
       - test
-      - simple
 
-permissions: # Explicitly grant write permissions
+# Explicitly grant write permissions
+permissions:
   contents: write
   actions: write
 
@@ -213,7 +213,7 @@ jobs:
       - name: Tag repo
         run: |
           TAG_NAME="${{ needs.build.outputs.PROJECT_VERSION }}/CI/PASS"
-          echo "Tagging repo with successful CI: $TAG_NAME"
+          echo "-----> Tagging repo with successful CI: $TAG_NAME"
           git tag $TAG_NAME
           git push origin $TAG_NAME
 
@@ -291,7 +291,7 @@ jobs:
       - name: Tag repo
         run: |
           TAG_NAME="${{ needs.build.outputs.PROJECT_VERSION }}/CI/${{ vars.STATUS_FAIL }}"
-          echo "Tagging repo with failed CI: $TAG_NAME"
+          echo "-----> Tagging repo with failed CI: $TAG_NAME"
           git tag -a $TAG_NAME -m "CI FAIL: ${{ job.status }}"
           git push origin $TAG_NAME
 
