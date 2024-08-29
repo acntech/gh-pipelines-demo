@@ -200,3 +200,5 @@ The deploy workflow (`.github/workflows/deploy.yml`) automates the deployment pr
     - DEV: Port 40080 (point browser to `http://remote-server:40080`)
     - QA: Port 40081 (point browser to `http://remote-server:40081`)
     - PROD: Port 40082 (point browser to `http://remote-server:40082`)
+
+## License
