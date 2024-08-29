@@ -233,7 +233,7 @@ jobs:
 
           # Iterate over the tests listed in the tests_to_run variable
           for test in ${{ env.TESTS_TO_RUN }}; do
-            TEST_NAME=$(echo "$test" | xargs | tr -d '\r\n')  # Trim and remove any carriage returns/newlines
+            TEST_NAME=$(echo "$test" | tr -d '[:space:]')  # Remove all whitespace characters including spaces, tabs, newlines, and carriage returns
             echo "Attempting to run test: $TEST_NAME"
           
             STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -243,6 +243,9 @@ jobs:
               ./tests/smoke-tests.sh ${{ vars.REMOTE_HOST }} ${{ needs.deploy.outputs.EXTERNAL_PORT }} ${{ github.event.inputs.version }} ${{ github.event.inputs.environment }}
             else
               TEST_SCRIPT="./tests/$test.sh"
+          
+              echo "Attempting to find test script: $TEST_SCRIPT"
+          
               # Check if the test script exists
               if [ ! -f "$TEST_SCRIPT" ]; then
                   echo "Test script not found: $TEST_SCRIPT"
@@ -251,6 +254,7 @@ jobs:
                   git tag $TAG_NAME
                   continue
               else
+                echo "Script found. Running: $TEST_SCRIPT"
                 chmod +x "$TEST_SCRIPT"
                 "$TEST_SCRIPT"
               fi  
