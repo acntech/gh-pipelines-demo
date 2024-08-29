@@ -37,9 +37,9 @@ jobs:
 
       - name: Debug - Print environment variables and context
         run: |
-          echo "${{ toJson(github) }}" >> github_context.json
-          echo "GITHUB_CONTEXT:"
-          cat github_context.json
+#          echo "${{ toJson(github) }}" >> github_context.json
+#          echo "GITHUB_CONTEXT:"
+#          cat github_context.json
           echo "ENVIRONMENT VARIABLES:"
           env
           echo "GH Actions Variables:"
