@@ -73,8 +73,8 @@ target server using Docker containers for the deployed application/web server - 
     
     \
     Point your browser to `https://remote-server:59443` to access Portainer and set the admin credentials. Note that Portainer is not secured with a signed 
-    certificate, so you will need to accept the browser warning.
-    
+    certificate, so you will need to accept the browser warning.    
+
 
 5. **Set GitHub variables:**
 
@@ -93,6 +93,7 @@ target server using Docker containers for the deployed application/web server - 
    | `STATUS_FAIL`    | `FAIL`                   |
    | `STATUS_PASS`    | `PASS`                   |
    | `STATUS_PENDING` | `PENDING`                |
+
 
 6. **Set GitHub secrets:** 
     - `SSH_KEY`: Private SSH key for the `ubuntu` user (copy from the setup script output)
