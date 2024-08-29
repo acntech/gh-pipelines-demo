@@ -60,7 +60,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: init
     outputs:
-     PREV_ENV: ${{ steps.validate_deployment.outputs.PREV_ENV }}
+      PREV_ENV: ${{ steps.validate_deployment.outputs.PREV_ENV }}
     steps:
 
       - name: Checkout project
@@ -197,12 +197,12 @@ jobs:
 
           # Parse ENV_TESTS variable into an array of tests for the current environment
           TESTS=$(echo "${{ vars.ENV_TESTS }}" | grep "^$ENVIRONMENT:" | cut -d ':' -f2 | tr ',' '\n')
-    
+          
           # Trim each test and remove leading/trailing whitespace
           TESTS_TO_RUN=$(echo "$TESTS" | while read -r test; do
             echo -n "$(echo "$test" | xargs) "
           done | xargs)
-    
+          
           # Export the trimmed tests
           echo "TESTS_TO_RUN=$TESTS_TO_RUN" >> $GITHUB_ENV
 
@@ -214,13 +214,16 @@ jobs:
           fetch-depth: 1
           token: ${{ secrets.UAT }}  # Use the UAT for checkout
 
+      # Configure Git to use UAT for pushing
       - name: Configure Git to use UAT for pushing
         run: |
-          git config user.name "thomas-muller666"  # Set your GitHub username
-          git config user.email "me.thomas.muller@gmail.com"  # Set your email associated with GitHub
-          git remote set-url origin https://x-access-token:${{ secrets.UAT }}@github.com/${{ github.repository }}.git    
+          git config user.name "thomas-muller666"
+          git config user.email "me.thomas.muller@gmail.com"
+          git remote remove origin
+          git remote add origin https://x-access-token:${{ secrets.UAT }}@github.com/${{ github.repository }}.git
+          git fetch --tags    
 
-            # Run all tests possible, tag the repo with PENDING if a test-script is missing for defined test
+      # Run all tests possible, tag the repo with PENDING if a test-script is missing for defined test
       - name: Run tests
         id: run_tests
         run: |
@@ -341,14 +344,7 @@ jobs:
       - name: Set up Git user
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "GitHub Actions Bot"    
-
-#      - name: Create (success) Git tag
-#        run: |
-#          TAG_NAME="${{ github.event.inputs.version }}/CD/${{ github.event.inputs.environment }}/${{ vars.STATUS_PASS }}"
-#          echo "-----> Tagging repo indicating successful deployment to ${{ github.event.inputs.environment }}: $TAG_NAME"
-#          git tag $TAG_NAME
-#          git push origin $TAG_NAME
+          git config --local user.name "GitHub Actions Bot"
 
       - name: Fetch Git notes and update with CD info
         run: |

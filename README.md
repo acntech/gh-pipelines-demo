@@ -53,7 +53,7 @@ target server using Docker containers for the deployed application/web server - 
     - Disable SSH root login
     - Disable SSH password authentication
     - Permit key-based SSH authentication
-    - Create a new user `ubuntu` with sudo privileges
+    - Create a new user `ubuntu` with sudo privileges (no password for sudo required)
     - Add the `ubuntu` user to the `docker` group
     - Generate SSH keys for the `ubuntu` user
     - Configure UFW rules
@@ -80,7 +80,7 @@ target server using Docker containers for the deployed application/web server - 
 
    | **Name**         | **Value**                |
    |------------------|--------------------------|
-   | `APP_NAME`       | `devops-test-app-1`      |
+   | `APP_NAME`       | `devops-test-app`        |
    | `DEV_PORT`       | `40080`                  |
    | `ENVIRONMENTS`   | `DEV, QA, PROD`          |
    | `ENV_TESTS`      | `[tests for each env]`   |
@@ -97,16 +97,17 @@ target server using Docker containers for the deployed application/web server - 
 
 6. **Set GitHub secrets:** 
     - `SSH_KEY`: Private SSH key for the `ubuntu` user (copy from the setup script output)
-    - `UAT`: User Access Token for the GitHub repository (to trigger the workflows via tags)
+    - `UAT`: User Access Token for the GitHub repository (to trigger workflows with tag push from other workflows)
 
 ## Usage
 
 - **Trigger the workflows:**
 
   - Push to `main` to trigger the build (CI) workflow
-  - The deployment (CD) workflow is triggered automatically after a successful build - will deploy to the DEV environment
-  - If all tests succeed for the any environment (DEV/QA), a success tag will trigger a promotion to the next environment (DEV -> QA, QA -> PROD).
-  - Note that the deployment script will prevent a version from being promoted to a higher environment if it has not been deployed to a lower environment first and all tests have passed in that enviroment.
+  - The deployment (CD) workflow is triggered automatically after a successful build - will deploy, pending tests, the built version to the DEV environment
+  - If all tests succeed for any environment (DEV/QA), a success tag will trigger a promotion to the next environment (DEV -> QA, QA -> PROD).
+  - Note that the deployment script will prevent a version from being promoted to a higher environment if it has not been deployed to a lower environment 
+    first and all tests have passed in that environment.
 
 ## GitHub Actions Workflows
 
@@ -194,11 +195,9 @@ The deploy workflow (`.github/workflows/deploy.yml`) automates the deployment pr
 
 - **SSH:** Port 50022
 - **Portainer:** Port 59443 (point browser to `https://remote-server:59443`)
-- **Docker Insecure Registry:** Port 55000 (validate with e.g. `curl http://<remote-server>:55000/v2/_catalog`)
+- **Docker Insecure Registry:** Port 55000 (validate with e.g. `curl http://remote-server:55000/v2/_catalog`)
 - **Registry UI:** Port 58080 (point browser to `http://remote-server:58080`)
 - **Custom Services:**
     - DEV: Port 40080 (point browser to `http://remote-server:40080`)
     - QA: Port 40081 (point browser to `http://remote-server:40081`)
     - PROD: Port 40082 (point browser to `http://remote-server:40082`)
-
-## License
