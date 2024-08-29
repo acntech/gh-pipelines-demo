@@ -115,6 +115,13 @@ jobs:
         if: env.ALL_TESTS_SATISFIED == 'true'
         run: |
           TAG_NAME="${{ env.VERSION }}/CD/${{ env.ENV }}/${{ vars.STATUS_PASS }}"
-          echo "-----> Tagging repo with ${{ vars.STATUS_PASS }} for all-tests: $TAG_NAME"
-          git tag "$TAG_NAME"
-          git push origin "$TAG_NAME"
+          echo "-----> Tagging repo with ${{ vars.STATUS_PASS }} for all tests: $TAG_NAME"
+
+          # Check if the tag already exists
+          if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
+            echo "Tag $TAG_NAME already exists, skipping tag creation."
+          else
+            git tag "$TAG_NAME"
+            git push origin "$TAG_NAME"
+          fi
+      
