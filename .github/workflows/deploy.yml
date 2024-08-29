@@ -220,7 +220,7 @@ jobs:
           git config user.email "me.thomas.muller@gmail.com"  # Set your email associated with GitHub
           git remote set-url origin https://x-access-token:${{ secrets.UAT }}@github.com/${{ github.repository }}.git    
 
-      # Run all tests possible, tag the repo with PENDING if a test-script is missing for defined test
+            # Run all tests possible, tag the repo with PENDING if a test-script is missing for defined test
       - name: Run tests
         id: run_tests
         run: |
@@ -233,16 +233,18 @@ jobs:
 
           # Iterate over the tests listed in the tests_to_run variable
           for test in ${{ env.TESTS_TO_RUN }}; do
-            TEST_NAME=$(echo "$test" | tr -d '[:space:]')  # Remove all whitespace characters including spaces, tabs, newlines, and carriage returns
+            # Remove all whitespace characters including spaces, tabs, newlines, and carriage returns
+            TEST_NAME=$(echo "$test" | tr -d '[:space:]')
             echo "Attempting to run test: $TEST_NAME"
           
             STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-            if [ "$test" = "smoke-tests" ]; then
+            if [ "$TEST_NAME" = "smoke-tests" ]; then
               chmod +x ./tests/smoke-tests.sh
               ./tests/smoke-tests.sh ${{ vars.REMOTE_HOST }} ${{ needs.deploy.outputs.EXTERNAL_PORT }} ${{ github.event.inputs.version }} ${{ github.event.inputs.environment }}
             else
-              TEST_SCRIPT="./tests/$test.sh"
+              # Explicitly construct the TEST_SCRIPT path
+              TEST_SCRIPT="./tests/${TEST_NAME}.sh"
           
               echo "Attempting to find test script: $TEST_SCRIPT"
           
@@ -261,7 +263,7 @@ jobs:
             fi
 
             EXIT_CODE=$?
-            
+          
             echo "Test $TEST_NAME exited with code: $EXIT_CODE"  
           
             FINISHED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -322,7 +324,7 @@ jobs:
           echo "TEST_RESULTS_ENCODED=$TEST_RESULTS_ENCODED" >> $GITHUB_OUTPUT
 
           # Exit with a non-zero status if any test failed
-          exit $OVERALL_EXIT_CODE  
+          exit $OVERALL_EXIT_CODE    
 
   success:
     runs-on: ubuntu-latest
