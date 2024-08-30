@@ -139,8 +139,7 @@ jobs:
             fi
           else
             echo "Skipping validation as this is the first promotion: LOCAL -> ${{ github.event.inputs.environment }}."
-          fi
-  
+          fi  
 
   deploy:
     runs-on: ubuntu-latest

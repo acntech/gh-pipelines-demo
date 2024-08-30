@@ -27,6 +27,10 @@ environments:
           scripts:
             - tests/performance_test.sh
 
+        # UAT tests are manual, the pipeline will tag this test as PENDING ([major].[minor].[patch]/CD/QA/uat-tests/PENDING) and promotion to PROD is
+        # only possible after the test is passed indicated by a tag of the form [major].[minor].[patch]/CD/QA/uat-tests/PASS. Pushing this tag will trigger
+        # the trigger the verify-and-tag workflow which will tag the environment as passed ([major].[minor].[patch]/CD/QA/PASS) and hence trigger the
+        # conditional-deploy workflow, which in turn will call the deployment pipeline.
         - name: uat-tests
 
   - PROD:
