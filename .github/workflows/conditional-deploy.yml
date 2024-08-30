@@ -13,23 +13,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
 
-      # Install yq for parsing YAML files
-      - name: Set up dependencies
-        run: |
-          if ! command -v yq &> /dev/null; then
-            echo "yq could not be found, installing..."
-            # Download the latest yq binary
-            sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
-          
-            # Make it executable
-            sudo chmod +x /usr/bin/yq
-          
-            # Verify the installation
-            yq --version
-          else
-            echo "yq is already installed"
-          fi
-
       - name: Extract Tag Information
         id: extract
         run: |

@@ -62,23 +62,6 @@ jobs:
       PREV_ENV: ${{ steps.validate_deployment.outputs.PREV_ENV }}
     steps:
 
-      # Install yq for parsing YAML files
-      - name: Set up dependencies
-        run: |
-          if ! command -v yq &> /dev/null; then
-            echo "yq could not be found, installing..."
-            # Download the latest yq binary
-            sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
-            
-            # Make it executable
-            sudo chmod +x /usr/bin/yq
-            
-            # Verify the installation
-            yq --version
-          else
-            echo "yq is already installed"
-          fi
-
       - name: Checkout project
         uses: actions/checkout@v3
         with:
@@ -92,7 +75,11 @@ jobs:
         id: validate_deployment
         run: |
           # Parse the environments from the YAML file
+          echo "Parsing environments from environment-tests.yml"
           ENVIRONMENTS=$(yq e '.environments | keys[]' ./environment-tests.yml)
+          
+          echo "Raw parsed environments:"
+          echo "$ENVIRONMENTS"
           
           # Convert the newline-separated list to an array, trimming each entry
           ENV_ARRAY=()
@@ -101,7 +88,17 @@ jobs:
             trimmed_env=$(echo "$env" | xargs)
             # Add the trimmed environment to the array
             ENV_ARRAY+=("$trimmed_env")
-          done <<< "$ENVIRONMENTS"          
+          done <<< "$ENVIRONMENTS"
+          
+          echo "Final ENV_ARRAY contents: ${ENV_ARRAY[@]}"
+          
+          if [ ${#ENV_ARRAY[@]} -eq 0 ]; then
+            echo "Error: ENV_ARRAY is empty. Please check the YAML structure and parsing."
+            exit 1
+          fi
+          
+          # Initialize PREV_ENV
+          PREV_ENV=""
           
           # Find the current environment and the previous one
           for i in "${!ENV_ARRAY[@]}"; do
@@ -111,23 +108,29 @@ jobs:
                 PREV_ENV="LOCAL"
               else
                 PREV_ENV="${ENV_ARRAY[$((i-1))]}"
+                echo "PREV_ENV set to: $PREV_ENV"
               fi
               break
             fi
           done
-
+          
+          if [ -z "$PREV_ENV" ]; then
+            echo "Error: PREV_ENV is not set. Exiting."
+            exit 1
+          fi
+          
           echo "PREV_ENV=$PREV_ENV" >> $GITHUB_OUTPUT
-
+          
           # Check if moving from LOCAL to the first environment
           if [[ "$PREV_ENV" == "LOCAL" && "${{ github.event.inputs.environment }}" != "${ENV_ARRAY[0]}" ]]; then
             echo "Invalid promotion: Cannot move from LOCAL to ${{ github.event.inputs.environment }}. The only allowed promotion from LOCAL is to ${ENV_ARRAY[0]}."
             exit 1
           fi
-
+          
           # If PREV_ENV is not "LOCAL", validate the previous deployment
           if [[ "$PREV_ENV" != "LOCAL" ]]; then
-            PREV_TAG="${{ github.event.inputs.version }}/CD/${PREV_ENV}/${{ vars.STATUS_PASS }}"
-
+            PREV_TAG="v${{ github.event.inputs.version }}/CD/${PREV_ENV}/${{ vars.STATUS_PASS }}"
+          
             echo "Looking for tag: $PREV_TAG"
             if git rev-parse "$PREV_TAG" >/dev/null 2>&1; then
               echo "Validation passed: The artifact has been deployed to, and successfully tested in, $PREV_ENV."
@@ -213,24 +216,6 @@ jobs:
       TEST_RESULTS_ENCODED: ${{ steps.run_tests.outputs.TEST_RESULTS_ENCODED }}
 
     steps:
-
-      # Install yq for parsing YAML files
-      - name: Set up dependencies
-        run: |
-          if ! command -v yq &> /dev/null; then
-            echo "yq could not be found, installing..."
-            # Download the latest yq binary
-            sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
-            
-            # Make it executable
-            sudo chmod +x /usr/bin/yq
-            
-            # Verify the installation
-            yq --version
-          else
-            echo "yq is already installed"
-          fi
-      
 
       # Need to checkout the project to access the test-scripts and push tags
       - name: Checkout project
