@@ -94,8 +94,7 @@ jobs:
           if [ ${#ENV_ARRAY[@]} -eq 0 ]; then
             echo "Error: ENV_ARRAY is empty. Please check the YAML structure and parsing."
             exit 1
-          fi
-          
+          fi          
           
           # Initialize PREV_ENV
           PREV_ENV=""
@@ -129,7 +128,7 @@ jobs:
           
           # If PREV_ENV is not "LOCAL", validate the previous deployment
           if [[ "$PREV_ENV" != "LOCAL" ]]; then
-            PREV_TAG="v${{ github.event.inputs.version }}/CD/${PREV_ENV}/${{ vars.STATUS_PASS }}"
+            PREV_TAG="${{ github.event.inputs.version }}/CD/${PREV_ENV}/${{ vars.STATUS_PASS }}"
           
             echo "Looking for tag: $PREV_TAG"
             if git rev-parse "$PREV_TAG" >/dev/null 2>&1; then
@@ -139,7 +138,7 @@ jobs:
               exit 1
             fi
           else
-            echo "Skipping validation as this is the first environment (LOCAL)."
+            echo "Skipping validation as this is the first promotion: LOCAL -> ${{ github.event.inputs.environment }}."
           fi
   
 
