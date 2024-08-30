@@ -65,8 +65,19 @@ jobs:
       # Install yq for parsing YAML files
       - name: Set up dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y yq
+          if ! command -v yq &> /dev/null; then
+            echo "yq could not be found, installing..."
+            # Download the latest yq binary
+            sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
+            
+            # Make it executable
+            sudo chmod +x /usr/bin/yq
+            
+            # Verify the installation
+            yq --version
+          else
+            echo "yq is already installed"
+          fi
 
       - name: Checkout project
         uses: actions/checkout@v3
@@ -206,8 +217,19 @@ jobs:
       # Install yq for parsing YAML files
       - name: Set up dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y yq 
+          if ! command -v yq &> /dev/null; then
+            echo "yq could not be found, installing..."
+            # Download the latest yq binary
+            sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
+            
+            # Make it executable
+            sudo chmod +x /usr/bin/yq
+            
+            # Verify the installation
+            yq --version
+          else
+            echo "yq is already installed"
+          fi
       
 
       # Need to checkout the project to access the test-scripts and push tags
