@@ -1,0 +1,17 @@
+{
+  "ci": {
+    "started_at": "2024-08-30T15:19:46Z",
+    "finished_at": "2024-08-30T15:20:21Z",
+    "status": "PASS",
+    "commit_hash": "565ca19b05352790d534067a583df1bcea29a42c",
+    "version": "1.0.9",
+    "duration": "PT35S",
+    "unit_tests": {
+      "started_at": "2024-08-30T15:19:56Z",
+      "finished_at": "2024-08-30T15:19:58Z",
+      "status": "PASS"
+    },
+    "message": "CI passed successfully"
+  },
+  "cd": {}
+}
