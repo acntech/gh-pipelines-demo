@@ -13,6 +13,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
 
+      # Install yq for parsing YAML files
+      - name: Set up dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y yq
+
       - name: Extract Tag Information
         id: extract
         run: |
@@ -36,18 +42,30 @@ jobs:
             echo "MATCHED=false" >> $GITHUB_ENV
           fi
 
+      - name: Checkout project
+        if: env.MATCHED == 'true'
+        uses: actions/checkout@v3
+        with:
+          ref: v${{ env.VERSION }} # Checkout the specific tag
+          fetch-depth: 1 # Shallow clone to avoid fetching unnecessary history
+
       - name: Determine Next Environment
         id: next-env
         if: env.MATCHED == 'true'
-        run: |
-          ENVIRONMENTS="${{ vars.ENVIRONMENTS }}"
+        run: |          
           CURRENT_ENV="${{ env.CURRENT_ENV }}"
-
-          # Convert environments string to an array and trim whitespace
-          IFS=',' read -r -a ENV_ARRAY <<< "$ENVIRONMENTS"
-          for i in "${!ENV_ARRAY[@]}"; do
-            ENV_ARRAY[$i]=$(echo "${ENV_ARRAY[$i]}" | xargs)
-          done
+          
+          # Parse the environment names from the YAML file
+          ENVIRONMENTS=$(yq e '.environments | keys[]' ./environment-tests.yml)
+          
+          # Convert the newline-separated list to an array, trimming each entry
+          ENV_ARRAY=()
+          while IFS= read -r env; do
+            # Trim leading and trailing whitespace (including newlines)
+            trimmed_env=$(echo "$env" | xargs)
+            # Add the trimmed environment to the array
+            ENV_ARRAY+=("$trimmed_env")
+          done <<< "$ENVIRONMENTS"
 
           # Find the index of the current environment
           for i in "${!ENV_ARRAY[@]}"; do
@@ -63,14 +81,9 @@ jobs:
             echo "NEXT_ENV=" >> $GITHUB_ENV
           else
             NEXT_ENV="${ENV_ARRAY[$(($CURRENT_INDEX + 1))]}"
+            echo "Next environment in the chain: $NEXT_ENV"
             echo "NEXT_ENV=$NEXT_ENV" >> $GITHUB_ENV
           fi
-
-      - name: Checkout Code for Tag Checking
-        if: env.NEXT_ENV != ''
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 1 # Shallow clone to avoid fetching unnecessary history
 
       - name: Check for Existing Tags in Next Environment
         id: check-next-env-tags

@@ -1,0 +1,36 @@
+# This file contains the test cases for each environment that are available for the application.
+
+environments:
+  - DEV:
+      tests:
+        - name: smoke-tests
+          scripts:
+            - tests/smoke_test.sh
+        - name: regression-tests
+          scripts:
+            - tests/regression_test.sh
+  - QA:
+      tests:
+        - name: smoke-tests
+          scripts:
+            - tests/smoke_test.sh
+
+        - name: regression-tests
+          scripts:
+            - tests/regression_test.sh
+
+        - name: integration-tests
+          scripts:
+            - tests/integration_test.sh
+
+        - name: performance-tests
+          scripts:
+            - tests/performance_test.sh
+
+        - name: uat-tests
+
+  - PROD:
+      tests:
+        - name: smoke-tests
+          scripts:
+            - tests/smoke_test.sh

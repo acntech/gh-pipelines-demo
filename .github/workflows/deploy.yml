@@ -47,7 +47,6 @@ jobs:
           env
           echo "GH Actions Variables:"
           echo "APP_NAME=${{ vars.APP_NAME }}"
-          echo "ENVIRONMENTS=${{ vars.ENVIRONMENTS }}"
           echo "DEV_PORT=${{ vars.DEV_PORT }}"
           echo "TEST_PORT=${{ vars.TEST_PORT }}"
           echo "PROD_PORT=${{ vars.PROD_PORT }}"
@@ -63,6 +62,12 @@ jobs:
       PREV_ENV: ${{ steps.validate_deployment.outputs.PREV_ENV }}
     steps:
 
+      # Install yq for parsing YAML files
+      - name: Set up dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y yq
+
       - name: Checkout project
         uses: actions/checkout@v3
         with:
@@ -75,12 +80,18 @@ jobs:
       - name: Validate Deployment
         id: validate_deployment
         run: |
-          # Access the ENVIRONMENTS variable from vars
-          ENVIRONMENTS="${{ vars.ENVIRONMENTS }}"
-
-          # Convert the comma-separated list to an array
-          IFS=',' read -r -a ENV_ARRAY <<< "$ENVIRONMENTS"
-
+          # Parse the environments from the YAML file
+          ENVIRONMENTS=$(yq e '.environments | keys[]' ./environment-tests.yml)
+          
+          # Convert the newline-separated list to an array, trimming each entry
+          ENV_ARRAY=()
+          while IFS= read -r env; do
+            # Trim leading and trailing whitespace (including newlines)
+            trimmed_env=$(echo "$env" | xargs)
+            # Add the trimmed environment to the array
+            ENV_ARRAY+=("$trimmed_env")
+          done <<< "$ENVIRONMENTS"          
+          
           # Find the current environment and the previous one
           for i in "${!ENV_ARRAY[@]}"; do
             if [[ "${ENV_ARRAY[$i]}" == "${{ github.event.inputs.environment }}" ]]; then
@@ -108,14 +119,15 @@ jobs:
 
             echo "Looking for tag: $PREV_TAG"
             if git rev-parse "$PREV_TAG" >/dev/null 2>&1; then
-              echo "Validation passed: The artifact has been deployed to $PREV_ENV."
+              echo "Validation passed: The artifact has been deployed to, and successfully tested in, $PREV_ENV."
             else
-              echo "Validation failed: The artifact has NOT been deployed to $PREV_ENV."
+              echo "Validation failed: The artifact has NOT been deployed to, or accepted in, $PREV_ENV."
               exit 1
             fi
           else
             echo "Skipping validation as this is the first environment (LOCAL)."
-          fi 
+          fi
+  
 
   deploy:
     runs-on: ubuntu-latest
@@ -190,21 +202,13 @@ jobs:
       TEST_RESULTS_ENCODED: ${{ steps.run_tests.outputs.TEST_RESULTS_ENCODED }}
 
     steps:
-      - name: Set up environment tests
-        id: setup_tests
-        run: |
-          ENVIRONMENT=${{ github.event.inputs.environment }}
 
-          # Parse ENV_TESTS variable into an array of tests for the current environment
-          TESTS=$(echo "${{ vars.ENV_TESTS }}" | grep "^$ENVIRONMENT:" | cut -d ':' -f2 | tr ',' '\n')
-          
-          # Trim each test and remove leading/trailing whitespace
-          TESTS_TO_RUN=$(echo "$TESTS" | while read -r test; do
-            echo -n "$(echo "$test" | xargs) "
-          done | xargs)
-          
-          # Export the trimmed tests
-          echo "TESTS_TO_RUN=$TESTS_TO_RUN" >> $GITHUB_ENV
+      # Install yq for parsing YAML files
+      - name: Set up dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y yq 
+      
 
       # Need to checkout the project to access the test-scripts and push tags
       - name: Checkout project
@@ -221,12 +225,14 @@ jobs:
           git config user.email "me.thomas.muller@gmail.com"
           git remote remove origin
           git remote add origin https://x-access-token:${{ secrets.UAT }}@github.com/${{ github.repository }}.git
-          git fetch --tags    
-
-      # Run all tests possible, tag the repo with PENDING if a test-script is missing for defined test
-      - name: Run tests
+          git fetch --tags
+          
+      - name: Run environment tests
         id: run_tests
         run: |
+          ENVIRONMENT=${{ github.event.inputs.environment }}
+          ENVIRONMENTS_CONFIG_FILE="./environment-tests.yml"
+
           # Initialize a JSON string to store all test results
           TEST_RESULTS="{}"
           OVERALL_EXIT_CODE=0  # Initialize overall status variable
@@ -234,41 +240,46 @@ jobs:
           # Disable exit on error within the loop
           set +e
 
-          # Iterate over the tests listed in the tests_to_run variable
-          for test in ${{ env.TESTS_TO_RUN }}; do
-            # Remove all whitespace characters including spaces, tabs, newlines, and carriage returns
-            TEST_NAME=$(echo "$test" | tr -d '[:space:]')
-            echo "Attempting to run test: $TEST_NAME"
-          
+          # Parse the number of tests in the current environment
+          NUM_TESTS=$(yq e ".environments[] | select(has(\"$ENVIRONMENT\")) | .${ENVIRONMENT}.tests | length" $ENVIRONMENTS_CONFIG_FILE)
+
+          # Iterate over each test in the selected environment
+          for (( i=0; i<$NUM_TESTS; i++ )); do
+            TEST_NAME=$(yq e ".environments[] | select(has(\"$ENVIRONMENT\")) | .${ENVIRONMENT}.tests[$i].name" $ENVIRONMENTS_CONFIG_FILE)
+            echo "Processing test: $TEST_NAME"
+
             STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-            if [ "$TEST_NAME" = "smoke-tests" ]; then
-              chmod +x ./tests/smoke-tests.sh
-              ./tests/smoke-tests.sh ${{ vars.REMOTE_HOST }} ${{ needs.deploy.outputs.EXTERNAL_PORT }} ${{ github.event.inputs.version }} ${{ github.event.inputs.environment }}
-            else
-              # Explicitly construct the TEST_SCRIPT path
-              TEST_SCRIPT="./tests/${TEST_NAME}.sh"
-          
-              echo "Attempting to find test script: $TEST_SCRIPT"
-          
-              # Check if the test script exists
-              if [ ! -f "$TEST_SCRIPT" ]; then
-                  echo "Test script not found: $TEST_SCRIPT"
-                  TAG_NAME="${{ github.event.inputs.version }}/CD/${{ github.event.inputs.environment }}/$TEST_NAME/${{ vars.STATUS_PENDING }}"
-                  echo "-----> Tagging repo with status for test $TEST_NAME: $TAG_NAME"
-                  git tag $TAG_NAME
-                  continue
-              else
-                echo "Script found. Running: $TEST_SCRIPT"
-                chmod +x "$TEST_SCRIPT"
-                "$TEST_SCRIPT"
-              fi  
+            # Get the list of scripts for the test (if it exists and is not empty)
+            SCRIPTS=$(yq e ".environments[] | select(has(\"$ENVIRONMENT\")) | .${ENVIRONMENT}.tests[$i] | select(has(\"scripts\")) | .scripts[]" $ENVIRONMENTS_CONFIG_FILE || echo "")
+  
+            if [ -z "$SCRIPTS" ]; then
+              echo "No scripts defined for $TEST_NAME."
+              TAG_NAME="${{ github.event.inputs.version }}/CD/${ENVIRONMENT}/$TEST_NAME/${{ vars.STATUS_PENDING }}"
+              echo "-----> Tagging repo with PENDING status for test $TEST_NAME: $TAG_NAME"
+              git tag $TAG_NAME
+              continue
             fi
 
-            EXIT_CODE=$?
-          
-            echo "Test $TEST_NAME exited with code: $EXIT_CODE"  
-          
+            # Run all scripts associated with the current test
+            for script in $SCRIPTS; do
+              echo "Running test script: $script"
+              chmod +x "$script"
+              "$script" "${{ vars.REMOTE_HOST }}" "${{ needs.deploy.outputs.EXTERNAL_PORT }}" "${{ github.event.inputs.version }}" "${{ github.event.inputs.environment }}"
+              EXIT_CODE=$?
+              echo "Script $script exited with code: $EXIT_CODE"
+            
+              if [ $EXIT_CODE -ne 0 ]; then
+                STATUS="${{ vars.STATUS_FAIL }}"
+                OVERALL_EXIT_CODE=1  # Mark overall status as failure
+              fi
+            done
+            
+            # If all scripts passed and STATUS wasn't set to FAIL, set it to PASS
+            if [ -z "$STATUS" ]; then
+              STATUS="${{ vars.STATUS_PASS }}"
+            fi
+  
             FINISHED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
             # Calculate duration in seconds
@@ -288,13 +299,6 @@ jobs:
             fi
             DURATION="${DURATION}${SECONDS}S"
 
-            if [ $EXIT_CODE -eq 0 ]; then
-              STATUS="${{ vars.STATUS_PASS }}"
-            else
-              STATUS="${{ vars.STATUS_FAIL }}"
-              OVERALL_EXIT_CODE=1  # Mark overall status as failure
-            fi
-
             # Update the TEST_RESULTS JSON with the current test's metadata
             TEST_RESULTS=$(echo "$TEST_RESULTS" | jq -c \
               --arg test_name "$TEST_NAME" \
@@ -304,8 +308,8 @@ jobs:
               --arg status "$STATUS" \
               '. + {($test_name): {started_at: $started_at, finished_at: $finished_at, duration: $duration, status: $status}}')
 
-            # Tag the repo with the test status            
-            TAG_NAME="${{ github.event.inputs.version }}/CD/${{ github.event.inputs.environment }}/$TEST_NAME/$STATUS"
+            # Tag the repo with the test status
+            TAG_NAME="${{ github.event.inputs.version }}/CD/${ENVIRONMENT}/$TEST_NAME/$STATUS"
             echo "-----> Tagging repo with status for test $TEST_NAME: $TAG_NAME"
             git tag $TAG_NAME
           done
@@ -327,7 +331,7 @@ jobs:
           echo "TEST_RESULTS_ENCODED=$TEST_RESULTS_ENCODED" >> $GITHUB_OUTPUT
 
           # Exit with a non-zero status if any test failed
-          exit $OVERALL_EXIT_CODE    
+          exit $OVERALL_EXIT_CODE  
 
   success:
     runs-on: ubuntu-latest

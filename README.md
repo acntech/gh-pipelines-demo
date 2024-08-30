@@ -11,7 +11,6 @@ target server using Docker containers for the deployed application/web server - 
 - [Usage](#usage)
 - [GitHub Actions Workflows](#github-actions-workflows)
 - [Ports and Services](#ports-and-services)
-- [License](#license)
 
 ## Prerequisites
 
@@ -30,8 +29,7 @@ target server using Docker containers for the deployed application/web server - 
 
 2. **Setup a public Ubuntu server:**
     
-   - Create a new (simple and public) Ubuntu server (e.g. a simple [Linode VM](https://www.linode.com/) or [DigitalOcean Droplet](https://www.digitalocean.
-     com/)) 
+   - Create a new (simple and public) Ubuntu server (e.g. a simple [Linode VM](https://www.linode.com/) or [DigitalOcean Droplet](https://www.digitalocean.com)) 
    - Take note of the root password and the public IP address of the server
     
 3. **Copy setup files to the remote server:**
@@ -82,8 +80,6 @@ target server using Docker containers for the deployed application/web server - 
    |------------------|--------------------------|
    | `APP_NAME`       | `devops-test-app`        |
    | `DEV_PORT`       | `40080`                  |
-   | `ENVIRONMENTS`   | `DEV, QA, PROD`          |
-   | `ENV_TESTS`      | `[tests for each env]`   |
    | `PROD_PORT`      | `40082`                  |
    | `QA_PORT`        | `40081`                  |
    | `REGISTRY_URL`   | `[remote-host-IP]:55000` |
@@ -139,9 +135,10 @@ The build workflow (`.github/workflows/build.yml`) automates the process of buil
     - Tags the repository with a failed CI tag
     - Creates a git notes object with CI failure details
 
+
 ### Deploy Workflow
 
-The deploy workflow (`.github/workflows/deploy.yml`) automates the deployment process to different environments.
+The deploy (promotion) workflow (`.github/workflows/deploy.yml`) automates the deployment process to different environments.
 
 #### Workflow Steps
 
@@ -154,8 +151,9 @@ The deploy workflow (`.github/workflows/deploy.yml`) automates the deployment pr
 7. **Deploy to remote host via SSH**
 8. **Run all defined tests**
 9. **Tag the repo according to test results**
-
+10. **Update the devops notes JSON object for the promotion**
 	
+
 ### Verify and Tag workflow**
 
 #### Workflow Steps

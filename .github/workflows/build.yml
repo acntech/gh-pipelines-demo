@@ -38,12 +38,10 @@ jobs:
           env
           echo "GH Actions Variables:"
           echo "APP_NAME=${{ vars.APP_NAME }}"
-          echo "ENVIRONMENTS=${{ vars.ENVIRONMENTS }}"
           echo "DEV_PORT=${{ vars.DEV_PORT }}"
-          echo "TEST_PORT=${{ vars.TEST_PORT }}"
+          echo "QA_PORT=${{ vars.QA_PORT }}"
           echo "PROD_PORT=${{ vars.PROD_PORT }}"
           echo "REGISTRY_URL=${{ vars.REGISTRY_URL }}"
-          echo "REGISTRY_USER=${{ vars.REGISTRY_USER }}"
           echo "REMOTE_HOST=${{ vars.REMOTE_HOST }}"
           echo "SSH_PORT=${{ vars.SSH_PORT }}"
           echo "SSH_USER=${{ vars.SSH_USER }}"
@@ -111,9 +109,11 @@ jobs:
           echo "UNIT_TESTS_STARTED_AT=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
 
           set +e
-
-          chmod +x ./tests/unit-tests.sh
-          ./tests/unit-tests.sh
+          
+          TEST_SCRIPT="./tests/unit_test.sh"
+          
+          chmod +x $TEST_SCRIPT
+          $TEST_SCRIPT
           EXIT_CODE=$?
 
           set -e
