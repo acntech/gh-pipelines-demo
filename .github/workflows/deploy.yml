@@ -81,15 +81,12 @@ jobs:
           echo "Raw parsed environments:"
           echo "$ENVIRONMENTS"
           
-          # Convert the newline-separated list to an array, trimming each entry
+          # Convert the newline-separated list to an array
           ENV_ARRAY=()
           while IFS= read -r env; do
-            # Trim leading and trailing whitespace (including newlines)
-            trimmed_env=$(echo "$env" | xargs)
-            # Add the trimmed environment to the array
-            ENV_ARRAY+=("$trimmed_env")
+            ENV_ARRAY+=("$env")
           done <<< "$ENVIRONMENTS"
-          
+
           echo "Final ENV_ARRAY contents: ${ENV_ARRAY[@]}"
           
           if [ ${#ENV_ARRAY[@]} -eq 0 ]; then
