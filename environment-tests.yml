@@ -1,4 +1,10 @@
-# This file contains the test cases for each environment that are available for the application.
+# This file dictates the tests to run in each environment, and the scripts to run for each test.
+# If no scripts are provided, the test is considered manual and will be tagged as PENDING.
+#
+# Example: UAT tests in QA are manual, the pipeline will tag this test as PENDING ([major].[minor].[patch]/CD/QA/uat-tests/PENDING)
+# and promotion to PROD is only possible after the test is passed indicated by a tag of the form [major].[minor].[patch]/CD/QA/uat-tests/PASS.
+# Pushing this tag will trigger the verify-and-tag workflow which will tag the environment as passed ([major].[minor].[patch]/CD/QA/PASS) and
+# hence trigger the conditional-deploy workflow, which in turn will call the deployment pipeline which will promote the application to PROD.
 
 environments:
   - DEV:
@@ -27,12 +33,7 @@ environments:
           scripts:
             - tests/performance_test.sh
 
-        # UAT tests are manual, the pipeline will tag this test as PENDING ([major].[minor].[patch]/CD/QA/uat-tests/PENDING) and promotion to PROD is
-        # only possible after the test is passed indicated by a tag of the form [major].[minor].[patch]/CD/QA/uat-tests/PASS. Pushing this tag will trigger
-        # the verify-and-tag workflow which will tag the environment as passed ([major].[minor].[patch]/CD/QA/PASS) and hence trigger the
-        # conditional-deploy workflow, which in turn will call the deployment pipeline which will promote the application to PROD.
         - name: uat-tests
-
   - PROD:
       tests:
         - name: smoke-tests
