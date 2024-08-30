@@ -49,17 +49,26 @@ jobs:
         run: |          
           CURRENT_ENV="${{ env.CURRENT_ENV }}"
           
-          # Parse the environment names from the YAML file
-          ENVIRONMENTS=$(yq e '.environments | keys[]' ./environment-tests.yml)
+          echo "Parsing environments from environment-tests.yml"
+
+          # Correct extraction of environment names from the list of mappings
+          ENVIRONMENTS=$(yq e '.environments[] | keys[]' ./environment-tests.yml)
+
+          echo "Raw parsed environments:"
+          echo "$ENVIRONMENTS"
           
-          # Convert the newline-separated list to an array, trimming each entry
+          # Convert the parsed list to an array
           ENV_ARRAY=()
           while IFS= read -r env; do
-            # Trim leading and trailing whitespace (including newlines)
-            trimmed_env=$(echo "$env" | xargs)
-            # Add the trimmed environment to the array
-            ENV_ARRAY+=("$trimmed_env")
+            ENV_ARRAY+=("$env")
           done <<< "$ENVIRONMENTS"
+
+          echo "Final ENV_ARRAY contents: ${ENV_ARRAY[@]}"
+          
+          if [ ${#ENV_ARRAY[@]} -eq 0 ]; then
+            echo "Error: ENV_ARRAY is empty. Please check the YAML structure and parsing."
+            exit 1
+          fi
 
           # Find the index of the current environment
           for i in "${!ENV_ARRAY[@]}"; do

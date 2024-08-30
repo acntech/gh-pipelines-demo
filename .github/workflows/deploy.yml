@@ -76,12 +76,14 @@ jobs:
         run: |
           # Parse the environments from the YAML file
           echo "Parsing environments from environment-tests.yml"
-          ENVIRONMENTS=$(yq e '.environments | keys[]' ./environment-tests.yml)
-          
+
+          # Correct extraction of environment names from the list of mappings
+          ENVIRONMENTS=$(yq e '.environments[] | keys[]' ./environment-tests.yml)
+
           echo "Raw parsed environments:"
           echo "$ENVIRONMENTS"
           
-          # Convert the newline-separated list to an array
+          # Convert the parsed list to an array
           ENV_ARRAY=()
           while IFS= read -r env; do
             ENV_ARRAY+=("$env")
@@ -93,6 +95,7 @@ jobs:
             echo "Error: ENV_ARRAY is empty. Please check the YAML structure and parsing."
             exit 1
           fi
+          
           
           # Initialize PREV_ENV
           PREV_ENV=""
