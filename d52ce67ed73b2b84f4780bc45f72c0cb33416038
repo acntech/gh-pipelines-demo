@@ -36,6 +36,40 @@
             "status": "PASS"
           }
         }
+      },
+      {
+        "source_env": "DEV",
+        "target_env": "QA",
+        "status": "PASS",
+        "started_at": "2024-08-30T16:03:43Z",
+        "finished_at": "2024-08-30T16:04:54Z",
+        "duration": "PT1M11S",
+        "tests": {
+          "smoke-tests": {
+            "started_at": "2024-08-30T16:04:35Z",
+            "finished_at": "2024-08-30T16:04:36Z",
+            "duration": "PT1S",
+            "status": "PASS"
+          },
+          "regression-tests": {
+            "started_at": "2024-08-30T16:04:36Z",
+            "finished_at": "2024-08-30T16:04:38Z",
+            "duration": "PT2S",
+            "status": "PASS"
+          },
+          "integration-tests": {
+            "started_at": "2024-08-30T16:04:38Z",
+            "finished_at": "2024-08-30T16:04:40Z",
+            "duration": "PT2S",
+            "status": "PASS"
+          },
+          "performance-tests": {
+            "started_at": "2024-08-30T16:04:40Z",
+            "finished_at": "2024-08-30T16:04:42Z",
+            "duration": "PT2S",
+            "status": "PASS"
+          }
+        }
       }
     ]
   }
